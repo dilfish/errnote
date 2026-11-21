@@ -58,10 +58,8 @@ function formatDate(value: string): string {
   return diff <= 0 ? '今天' : `${diff} 天前`;
 }
 
-function shortDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${date.getMonth() + 1}/${date.getDate()}`;
+function latestWrongTime(problem: Problem): string {
+  return problem.wrongTimes.length > 0 ? problem.wrongTimes[0] : problem.createdAt;
 }
 
 type Props = {
@@ -385,7 +383,7 @@ export function Practice({ healthReady }: Props) {
                 ))}
               </div>
               <span className="muted small mono">
-                #{problem.id} · {formatDate(problem.createdAt)}
+                #{problem.id} · 最近错在 {formatDate(latestWrongTime(problem))}
               </span>
             </header>
 
@@ -424,13 +422,7 @@ export function Practice({ healthReady }: Props) {
               >
                 {generating === problem.id ? '生成中…' : 'AI 重新生成'}
               </button>
-              {problem.wrongCount > 0 && (
-                <span className="muted small">
-                  错过 {problem.wrongCount} 次
-                  {problem.wrongTimes.length > 0 &&
-                    `（最近：${problem.wrongTimes.slice(0, 3).map(shortDate).join('、')}）`}
-                </span>
-              )}
+              {problem.wrongCount > 0 && <span className="muted small">错过 {problem.wrongCount} 次</span>}
             </footer>
           </article>
         ))}

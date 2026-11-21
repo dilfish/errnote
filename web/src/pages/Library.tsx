@@ -238,7 +238,9 @@ export function Library({ onChanged }: Props) {
                 ))}
                 {problem.mastered && <span className="badge badge--ok">已掌握</span>}
               </div>
-              <span className="muted mono">#{problem.id} · {formatDate(problem.createdAt)}</span>
+              <span className="muted mono">
+                #{problem.id} · 录入 {formatDate(problem.createdAt)}
+              </span>
             </header>
 
             <div className="problem-item__body">
