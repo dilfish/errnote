@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from '../api';
 import { ProblemCard } from '../components/ProblemCard';
 import { formFromProblem, formToPayload, type ProblemForm } from '../form';
+import { loadStored, saveStored } from '../storage';
 import { GRADES, SEMESTERS, UNITS, type Problem, type ProblemListResponse } from '../types';
 import { sortByList } from '../utils';
 
 const PAGE_SIZE = 20;
+const FILTER_KEY = 'errnote.filters.library';
+const DEFAULT_FILTERS = { subject: '', grade: '', semester: '', unit: '' };
 
 type Props = {
   onChanged: () => void;
@@ -25,6 +28,7 @@ function shortDate(value: string): string {
 }
 
 export function Library({ onChanged }: Props) {
+  const stored = useMemo(() => loadStored(FILTER_KEY, DEFAULT_FILTERS), []);
   const [items, setItems] = useState<Problem[]>([]);
   const [total, setTotal] = useState(0);
   const [subjects, setSubjects] = useState<{ subject: string; n: number }[]>([]);
@@ -32,10 +36,10 @@ export function Library({ onChanged }: Props) {
   const [units, setUnits] = useState<string[]>([]);
   const [semesters, setSemesters] = useState<string[]>([]);
   const [q, setQ] = useState('');
-  const [subject, setSubject] = useState('');
-  const [grade, setGrade] = useState('');
-  const [unit, setUnit] = useState('');
-  const [semester, setSemester] = useState('');
+  const [subject, setSubject] = useState(stored.subject);
+  const [grade, setGrade] = useState(stored.grade);
+  const [unit, setUnit] = useState(stored.unit);
+  const [semester, setSemester] = useState(stored.semester);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<{ form: ProblemForm; saving?: boolean; error?: string } | null>(null);
@@ -75,6 +79,10 @@ export function Library({ onChanged }: Props) {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [q, subject, grade, semester, unit]);
+
+  useEffect(() => {
+    saveStored(FILTER_KEY, { subject, grade, semester, unit });
+  }, [subject, grade, semester, unit]);
 
   async function remove(problem: Problem): Promise<void> {
     if (!window.confirm(`确定删除这道题？\n\n${problem.stem.slice(0, 60)}`)) return;

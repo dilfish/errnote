@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from '../api';
 import { formFromDraft, parseOptionsText, type ProblemForm } from '../form';
 import { printPaper } from '../print';
+import { loadStored, saveStored } from '../storage';
 import {
   DIFFICULTY_LABELS,
   GRADES,
@@ -66,13 +67,36 @@ type Props = {
   healthReady: boolean;
 };
 
+const FILTER_KEY = 'errnote.filters.practice';
+
+const DEFAULT_FILTERS = {
+  subject: '',
+  grade: '',
+  semester: '',
+  unit: '',
+  minWrong: '1',
+  rangeKey: 'recent-5',
+  withAnswers: false,
+};
+
+function initialFilters() {
+  const stored = loadStored(FILTER_KEY, DEFAULT_FILTERS);
+  return {
+    ...stored,
+    // 选项被改过（比如删掉了某个选项）时回退到默认，避免选中项不存在
+    rangeKey: RANGES.some((item) => item.key === stored.rangeKey) ? stored.rangeKey : DEFAULT_FILTERS.rangeKey,
+    minWrong: WRONG_COUNTS.some((item) => item.value === stored.minWrong) ? stored.minWrong : DEFAULT_FILTERS.minWrong,
+  };
+}
+
 export function Practice({ healthReady }: Props) {
-  const [subject, setSubject] = useState('');
-  const [grade, setGrade] = useState('');
-  const [semester, setSemester] = useState('');
-  const [unit, setUnit] = useState('');
-  const [minWrong, setMinWrong] = useState('1');
-  const [rangeKey, setRangeKey] = useState('recent-5');
+  const stored = useMemo(initialFilters, []);
+  const [subject, setSubject] = useState(stored.subject);
+  const [grade, setGrade] = useState(stored.grade);
+  const [semester, setSemester] = useState(stored.semester);
+  const [unit, setUnit] = useState(stored.unit);
+  const [minWrong, setMinWrong] = useState(stored.minWrong);
+  const [rangeKey, setRangeKey] = useState(stored.rangeKey);
   const [subjects, setSubjects] = useState<string[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
   const [semesters, setSemesters] = useState<string[]>([]);
@@ -86,7 +110,7 @@ export function Practice({ healthReady }: Props) {
   const [generating, setGenerating] = useState<number | null>(null);
   const [sheet, setSheet] = useState<SheetItem[]>([]);
   const [notice, setNotice] = useState('');
-  const [withAnswers, setWithAnswers] = useState(false);
+  const [withAnswers, setWithAnswers] = useState(stored.withAnswers);
   const [printing, setPrinting] = useState(false);
 
   const range = RANGES.find((item) => item.key === rangeKey) ?? RANGES[1];
@@ -111,6 +135,10 @@ export function Practice({ healthReady }: Props) {
         setSemesters([]);
       });
   }, []);
+
+  useEffect(() => {
+    saveStored(FILTER_KEY, { subject, grade, semester, unit, minWrong, rangeKey, withAnswers });
+  }, [subject, grade, semester, unit, minWrong, rangeKey, withAnswers]);
 
   const load = useCallback(
     async (offset = 0) => {
