@@ -50,6 +50,8 @@ export type ProblemListResponse = {
   total: number;
   subjects: { subject: string; n: number }[];
   grades: { grade: string; n: number }[];
+  units: { unit: string; n: number }[];
+  semesters: { semester: string; n: number }[];
 };
 
 export const SUBJECTS = [

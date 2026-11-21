@@ -180,6 +180,8 @@ export function createApp(deps: AppDeps): (req: http.IncomingMessage, res: http.
           offset: Number(params.get('offset') ?? 0),
           subject: params.get('subject') ?? undefined,
           grade: params.get('grade') ?? undefined,
+          unit: params.get('unit') ?? undefined,
+          semester: params.get('semester') ?? undefined,
           knowledgePoint: params.get('knowledgePoint') ?? undefined,
           mastered: masteredRaw === '1' || masteredRaw === 'true' ? true : masteredRaw === '0' || masteredRaw === 'false' ? false : undefined,
           minWrongCount: Number.isFinite(minWrongRaw) && minWrongRaw > 0 ? minWrongRaw : undefined,
@@ -187,7 +189,19 @@ export function createApp(deps: AppDeps): (req: http.IncomingMessage, res: http.
           createdBefore: before && !Number.isNaN(Date.parse(before)) ? new Date(before).toISOString() : undefined,
           createdAfter: after && !Number.isNaN(Date.parse(after)) ? new Date(after).toISOString() : undefined,
         });
-        sendJson(res, 200, { ...result, subjects: repo.subjects(), grades: repo.grades() });
+        sendJson(res, 200, { ...result, subjects: repo.subjects(), grades: repo.grades(), units: repo.units(), semesters: repo.semesters() });
+      },
+    },
+    {
+      method: 'GET',
+      pattern: /^\/api\/filters$/,
+      handler: async (_req, res) => {
+        sendJson(res, 200, {
+          subjects: repo.subjects(),
+          grades: repo.grades(),
+          units: repo.units(),
+          semesters: repo.semesters(),
+        });
       },
     },
     {

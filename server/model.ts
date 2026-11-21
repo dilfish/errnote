@@ -35,6 +35,8 @@ export type ProblemFilter = {
   offset?: number;
   subject?: string;
   grade?: string;
+  unit?: string;
+  semester?: string;
   knowledgePoint?: string;
   mastered?: boolean;
   q?: string;

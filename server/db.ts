@@ -181,6 +181,14 @@ export class ProblemRepo {
       where.push('problems.grade = ?');
       params.push(filter.grade);
     }
+    if (filter.unit) {
+      where.push('problems.unit = ?');
+      params.push(filter.unit);
+    }
+    if (filter.semester) {
+      where.push('problems.semester = ?');
+      params.push(filter.semester);
+    }
     if (filter.knowledgePoint) {
       where.push("problems.knowledge_points LIKE ? ESCAPE '\\'");
       params.push(`%${likeEscape(filter.knowledgePoint)}%`);
@@ -237,6 +245,20 @@ export class ProblemRepo {
       .prepare("SELECT grade, COUNT(*) AS n FROM problems WHERE grade <> '' GROUP BY grade ORDER BY grade")
       .all() as Row[];
     return rows.map((row) => ({ grade: String(row.grade), n: Number(row.n) }));
+  }
+
+  units(): { unit: string; n: number }[] {
+    const rows = this.db
+      .prepare("SELECT unit, COUNT(*) AS n FROM problems WHERE unit <> '' GROUP BY unit ORDER BY n DESC")
+      .all() as Row[];
+    return rows.map((row) => ({ unit: String(row.unit), n: Number(row.n) }));
+  }
+
+  semesters(): { semester: string; n: number }[] {
+    const rows = this.db
+      .prepare("SELECT semester, COUNT(*) AS n FROM problems WHERE semester <> '' GROUP BY semester ORDER BY n DESC")
+      .all() as Row[];
+    return rows.map((row) => ({ semester: String(row.semester), n: Number(row.n) }));
   }
 
   create(input: unknown, extra?: { source?: string; imagePath?: string | null }): Problem {

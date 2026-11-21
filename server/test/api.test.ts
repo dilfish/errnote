@@ -422,6 +422,18 @@ describe('题库存取与筛选', () => {
       `/api/problems?subject=${encodeURIComponent('数学')}&q=${encodeURIComponent('属性测试题')}&mastered=0`,
     );
     assert.equal(active.body.total, 1);
+
+    const byUnit = await call<{ total: number }>(`/api/problems?unit=${encodeURIComponent('第四单元')}`);
+    assert.equal(byUnit.body.total, 1);
+    const bySemester = await call<{ total: number }>(`/api/problems?semester=${encodeURIComponent('上学期')}`);
+    assert.ok(bySemester.body.total >= 1);
+    const noUnit = await call<{ total: number }>(`/api/problems?unit=${encodeURIComponent('第九单元')}`);
+    assert.equal(noUnit.body.total, 0);
+
+    const filters = await call<{ units: { unit: string }[]; semesters: { semester: string }[] }>('/api/filters');
+    assert.equal(filters.status, 200);
+    assert.ok(filters.body.units.some((item) => item.unit === '第四单元'));
+    assert.ok(filters.body.semesters.some((item) => item.semester === '上学期'));
   });
 
   it('重开数据库后题目与图片条数不变', async () => {    const before = repo.count();

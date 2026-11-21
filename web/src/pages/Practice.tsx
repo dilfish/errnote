@@ -4,11 +4,15 @@ import { formFromDraft, parseOptionsText, type ProblemForm } from '../form';
 import { printPaper } from '../print';
 import {
   DIFFICULTY_LABELS,
+  GRADES,
+  SEMESTERS,
+  UNITS,
   type Difficulty,
   type Problem,
   type ProblemDraft,
   type ProblemListResponse,
 } from '../types';
+import { sortByList } from '../utils';
 
 const PAGE_SIZE = 50;
 
@@ -67,10 +71,14 @@ type Props = {
 export function Practice({ healthReady }: Props) {
   const [subject, setSubject] = useState('');
   const [grade, setGrade] = useState('');
+  const [semester, setSemester] = useState('');
+  const [unit, setUnit] = useState('');
   const [minWrong, setMinWrong] = useState('1');
   const [rangeKey, setRangeKey] = useState('recent-5');
   const [subjects, setSubjects] = useState<string[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
+  const [semesters, setSemesters] = useState<string[]>([]);
+  const [units, setUnits] = useState<string[]>([]);
   const [items, setItems] = useState<Problem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -86,12 +94,24 @@ export function Practice({ healthReady }: Props) {
   const range = RANGES.find((item) => item.key === rangeKey) ?? RANGES[1];
 
   useEffect(() => {
-    api<{ subjects: { subject: string; n: number }[] }>('/api/subjects')
-      .then((result) => setSubjects(result.subjects.map((item) => item.subject)))
-      .catch(() => setSubjects([]));
-    api<{ grades: { grade: string; n: number }[] }>('/api/grades')
-      .then((result) => setGrades(result.grades.map((item) => item.grade)))
-      .catch(() => setGrades([]));
+    api<{
+      subjects: { subject: string; n: number }[];
+      grades: { grade: string; n: number }[];
+      units: { unit: string; n: number }[];
+      semesters: { semester: string; n: number }[];
+    }>('/api/filters')
+      .then((result) => {
+        setSubjects(result.subjects.map((item) => item.subject));
+        setGrades(result.grades.map((item) => item.grade));
+        setUnits(result.units.map((item) => item.unit));
+        setSemesters(result.semesters.map((item) => item.semester));
+      })
+      .catch(() => {
+        setSubjects([]);
+        setGrades([]);
+        setUnits([]);
+        setSemesters([]);
+      });
   }, []);
 
   const load = useCallback(
@@ -102,6 +122,8 @@ export function Practice({ healthReady }: Props) {
         const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
         if (subject) params.set('subject', subject);
         if (grade) params.set('grade', grade);
+        if (semester) params.set('semester', semester);
+        if (unit) params.set('unit', unit);
         if (minWrong) params.set('minWrongCount', minWrong);
         params.set('mastered', '0');
         if (range.days) params.set('after', daysAgo(range.days));
@@ -115,7 +137,7 @@ export function Practice({ healthReady }: Props) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subject, grade, minWrong, rangeKey],
+    [subject, grade, semester, unit, minWrong, rangeKey],
   );
 
   useEffect(() => {
@@ -171,6 +193,8 @@ export function Practice({ healthReady }: Props) {
         const params = new URLSearchParams({ limit: '200', offset: String(offset) });
         if (subject) params.set('subject', subject);
         if (grade) params.set('grade', grade);
+        if (semester) params.set('semester', semester);
+        if (unit) params.set('unit', unit);
         if (minWrong) params.set('minWrongCount', minWrong);
         params.set('mastered', '0');
         if (range.days) params.set('after', daysAgo(range.days));
@@ -224,7 +248,23 @@ export function Practice({ healthReady }: Props) {
           </select>
           <select value={grade} onChange={(event) => setGrade(event.target.value)}>
             <option value="">全部年级</option>
-            {grades.map((item) => (
+            {sortByList(grades, GRADES).map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <select value={semester} onChange={(event) => setSemester(event.target.value)}>
+            <option value="">全部学期</option>
+            {sortByList(semesters, SEMESTERS).map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <select value={unit} onChange={(event) => setUnit(event.target.value)}>
+            <option value="">全部单元</option>
+            {sortByList(units, UNITS).map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>

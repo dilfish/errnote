@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from '../api';
 import { ProblemCard } from '../components/ProblemCard';
 import { formFromProblem, formToPayload, type ProblemForm } from '../form';
-import type { Problem, ProblemListResponse } from '../types';
+import { GRADES, SEMESTERS, UNITS, type Problem, type ProblemListResponse } from '../types';
+import { sortByList } from '../utils';
 
 const PAGE_SIZE = 20;
 
@@ -28,9 +29,13 @@ export function Library({ onChanged }: Props) {
   const [total, setTotal] = useState(0);
   const [subjects, setSubjects] = useState<{ subject: string; n: number }[]>([]);
   const [grades, setGrades] = useState<{ grade: string; n: number }[]>([]);
+  const [units, setUnits] = useState<string[]>([]);
+  const [semesters, setSemesters] = useState<string[]>([]);
   const [q, setQ] = useState('');
   const [subject, setSubject] = useState('');
   const [grade, setGrade] = useState('');
+  const [unit, setUnit] = useState('');
+  const [semester, setSemester] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<{ form: ProblemForm; saving?: boolean; error?: string } | null>(null);
@@ -47,10 +52,14 @@ export function Library({ onChanged }: Props) {
         if (q.trim()) params.set('q', q.trim());
         if (subject) params.set('subject', subject);
         if (grade) params.set('grade', grade);
+        if (semester) params.set('semester', semester);
+        if (unit) params.set('unit', unit);
         const result = await api<ProblemListResponse>(`/api/problems?${params.toString()}`);
         setTotal(result.total);
         setSubjects(result.subjects);
         setGrades(result.grades);
+        setUnits(result.units.map((item) => item.unit));
+        setSemesters(result.semesters.map((item) => item.semester));
         setItems((prev) => (options.append ? [...prev, ...result.items] : result.items));
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载失败');
@@ -59,13 +68,13 @@ export function Library({ onChanged }: Props) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [q, subject, grade, items.length],
+    [q, subject, grade, semester, unit, items.length],
   );
 
   useEffect(() => {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
-  }, [q, subject, grade]);
+  }, [q, subject, grade, semester, unit]);
 
   async function remove(problem: Problem): Promise<void> {
     if (!window.confirm(`确定删除这道题？\n\n${problem.stem.slice(0, 60)}`)) return;
@@ -125,7 +134,9 @@ export function Library({ onChanged }: Props) {
   }
 
   const subjectOptions = useMemo(() => subjects.map((item) => item.subject), [subjects]);
-  const gradeOptions = useMemo(() => grades.map((item) => item.grade), [grades]);
+  const gradeOptions = useMemo(() => sortByList(grades.map((item) => item.grade), GRADES), [grades]);
+  const unitOptions = useMemo(() => sortByList(units, UNITS), [units]);
+  const semesterOptions = useMemo(() => sortByList(semesters, SEMESTERS), [semesters]);
 
   return (
     <div className="page">
@@ -148,6 +159,22 @@ export function Library({ onChanged }: Props) {
           <select value={grade} onChange={(event) => setGrade(event.target.value)}>
             <option value="">全部年级</option>
             {gradeOptions.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <select value={semester} onChange={(event) => setSemester(event.target.value)}>
+            <option value="">全部学期</option>
+            {semesterOptions.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <select value={unit} onChange={(event) => setUnit(event.target.value)}>
+            <option value="">全部单元</option>
+            {unitOptions.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
