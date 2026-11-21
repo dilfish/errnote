@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, before, describe, it } from 'node:test';
 import { createApp } from '../app.ts';
 import { openDb, ProblemRepo } from '../db.ts';
@@ -248,14 +249,22 @@ describe('题库存取与筛选', () => {
     assert.equal(search.body.total, 1);
   });
 
-  it('错误次数 +1 与已掌握切换可以持久化', async () => {
-    const created = await call<{ item: { id: number } }>('/api/problems', {
+  it('错误次数 +1 会记录时间，已掌握可切换', async () => {
+    const created = await call<{ item: { id: number; wrongCount: number; wrongTimes: string[] } }>('/api/problems', {
       method: 'POST',
       json: { subject: '数学', stem: '状态测试题', answer: '1' },
     });
     const id = created.body.item.id;
-    const wrong = await call<{ item: { wrongCount: number } }>(`/api/problems/${id}/wrong`, { method: 'POST' });
-    assert.equal(wrong.body.item.wrongCount, 1);
+    assert.equal(created.body.item.wrongCount, 1);
+    assert.equal(created.body.item.wrongTimes.length, 1);
+
+    const wrong = await call<{ item: { wrongCount: number; wrongTimes: string[] } }>(`/api/problems/${id}/wrong`, {
+      method: 'POST',
+    });
+    assert.equal(wrong.body.item.wrongCount, 2);
+    assert.equal(wrong.body.item.wrongTimes.length, 2);
+    assert.ok(wrong.body.item.wrongTimes.every((time) => !Number.isNaN(Date.parse(time))));
+
     const mastered = await call<{ item: { mastered: boolean } }>(`/api/problems/${id}/mastered`, {
       method: 'POST',
       json: { mastered: true },
@@ -263,6 +272,23 @@ describe('题库存取与筛选', () => {
     assert.equal(mastered.body.item.mastered, true);
     const list = await call<{ total: number }>('/api/problems?mastered=1');
     assert.equal(list.body.total, 1);
+  });
+
+  it('错误次数过滤：默认 1 次以上，可筛 2 次以上', async () => {
+    const created = await call<{ item: { id: number } }>('/api/problems', {
+      method: 'POST',
+      json: { subject: '次数测试', stem: '只错过一次的题', answer: '1' },
+    });
+    const id = created.body.item.id;
+
+    const once = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=1');
+    assert.equal(once.body.total, 1);
+    const twice = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=2');
+    assert.equal(twice.body.total, 0);
+
+    await call(`/api/problems/${id}/wrong`, { method: 'POST' });
+    const twiceAfter = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=2');
+    assert.equal(twiceAfter.body.total, 1);
   });
 
   it('按年级筛选，并返回年级统计', async () => {
@@ -280,7 +306,7 @@ describe('题库存取与筛选', () => {
     assert.equal(none.body.total, 0);
   });
 
-  it('按发生日期区间筛选错题', async () => {
+  it('按发生日期区间筛选错题（任意一次错误时间命中即可）', async () => {
     const old = repo.importDraft({
       subject: '日期测试',
       grade: '三年级',
@@ -305,6 +331,59 @@ describe('题库存取与筛选', () => {
       `/api/problems?after=${encodeURIComponent(fiveDaysAgo)}&subject=${encodeURIComponent('日期测试')}`,
     );
     assert.equal(recent.body.total, 0);
+
+    // 十天前的题今天又错了一次 → 最近 5 天筛选也应该命中
+    await call(`/api/problems/${old.id}/wrong`, { method: 'POST' });
+    const recentAfter = await call<{ total: number }>(
+      `/api/problems?after=${encodeURIComponent(fiveDaysAgo)}&subject=${encodeURIComponent('日期测试')}`,
+    );
+    assert.equal(recentAfter.body.total, 1);
+  });
+
+  it('老库（v1）升级后自动补错误时间并计入首次错误', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'errnote-migrate-'));
+    const file = path.join(dir, 'old.db');
+    const raw = new DatabaseSync(file);
+    raw.exec(`
+      CREATE TABLE problems (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject TEXT NOT NULL DEFAULT '',
+        grade TEXT NOT NULL DEFAULT '',
+        stem TEXT NOT NULL,
+        options TEXT NOT NULL DEFAULT '[]',
+        answer TEXT NOT NULL DEFAULT '',
+        analysis TEXT NOT NULL DEFAULT '',
+        knowledge_points TEXT NOT NULL DEFAULT '[]',
+        source TEXT NOT NULL DEFAULT '',
+        image_path TEXT,
+        wrong_count INTEGER NOT NULL DEFAULT 0,
+        mastered INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      PRAGMA user_version = 1;
+    `);
+    const oldTime = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
+    raw
+      .prepare(
+        `INSERT INTO problems (subject, grade, stem, answer, wrong_count, created_at, updated_at)
+         VALUES ('数学', '三年级', '老库里的题', '1', 0, ?, ?)`,
+      )
+      .run(oldTime, oldTime);
+    raw.close();
+
+    const db = openDb(file);
+    const migrated = new ProblemRepo(db);
+    const item = migrated.get(1);
+    assert.equal(item?.wrongCount, 1, '首次错误应计入次数');
+    assert.equal(item?.wrongTimes.length, 1);
+    assert.equal(item?.wrongTimes[0], oldTime);
+    const recent = migrated.list({
+      createdAfter: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    assert.equal(recent.total, 0, '20 天前的题不该出现在最近 5 天里');
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it('重开数据库后题目与图片条数不变', async () => {    const before = repo.count();

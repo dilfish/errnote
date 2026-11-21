@@ -20,12 +20,19 @@ type Range = {
 };
 
 const RANGES: Range[] = [
-  { key: 'recent-3', label: '最近 3 天（3 天前至今）', days: 3 },
-  { key: 'recent-5', label: '最近 5 天（5 天前至今）', days: 5 },
-  { key: 'recent-7', label: '最近 7 天（7 天前至今）', days: 7 },
-  { key: 'recent-15', label: '最近 15 天（15 天前至今）', days: 15 },
-  { key: 'recent-30', label: '最近 30 天（30 天前至今）', days: 30 },
+  { key: 'recent-3', label: '最近 3 天', days: 3 },
+  { key: 'recent-5', label: '最近 5 天', days: 5 },
+  { key: 'recent-7', label: '最近 7 天', days: 7 },
+  { key: 'recent-15', label: '最近 15 天', days: 15 },
+  { key: 'recent-30', label: '最近 30 天', days: 30 },
   { key: 'all', label: '全部错题' },
+];
+
+const WRONG_COUNTS = [
+  { value: '1', label: '错 1 次以上' },
+  { value: '2', label: '错 2 次以上' },
+  { value: '3', label: '错 3 次以上' },
+  { value: '5', label: '错 5 次以上' },
 ];
 
 /** 本次练习卷里的一道题（只存在于页面上，不入库） */
@@ -47,6 +54,12 @@ function formatDate(value: string): string {
   return diff <= 0 ? '今天' : `${diff} 天前`;
 }
 
+function shortDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 type Props = {
   healthReady: boolean;
 };
@@ -54,6 +67,7 @@ type Props = {
 export function Practice({ healthReady }: Props) {
   const [subject, setSubject] = useState('');
   const [grade, setGrade] = useState('');
+  const [minWrong, setMinWrong] = useState('1');
   const [rangeKey, setRangeKey] = useState('recent-5');
   const [subjects, setSubjects] = useState<string[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
@@ -88,6 +102,7 @@ export function Practice({ healthReady }: Props) {
         const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
         if (subject) params.set('subject', subject);
         if (grade) params.set('grade', grade);
+        if (minWrong) params.set('minWrongCount', minWrong);
         if (range.days) params.set('after', daysAgo(range.days));
         const result = await api<ProblemListResponse>(`/api/problems?${params.toString()}`);
         setTotal(result.total);
@@ -99,7 +114,7 @@ export function Practice({ healthReady }: Props) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subject, grade, rangeKey],
+    [subject, grade, minWrong, rangeKey],
   );
 
   useEffect(() => {
@@ -155,6 +170,7 @@ export function Practice({ healthReady }: Props) {
         const params = new URLSearchParams({ limit: '200', offset: String(offset) });
         if (subject) params.set('subject', subject);
         if (grade) params.set('grade', grade);
+        if (minWrong) params.set('minWrongCount', minWrong);
         if (range.days) params.set('after', daysAgo(range.days));
         const result = await api<ProblemListResponse>(`/api/problems?${params.toString()}`);
         collected.push(...result.items);
@@ -210,10 +226,18 @@ export function Practice({ healthReady }: Props) {
               </option>
             ))}
           </select>
+          <select value={minWrong} onChange={(event) => setMinWrong(event.target.value)}>
+            {WRONG_COUNTS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
           <span className="muted">{loading ? '加载中…' : `共 ${total} 道`}</span>
         </div>
         <p className="muted small practice-hint">
-          列出所选时间范围内的错题。「AI 重新生成」出的变式题只在屏幕上练习，不入库；「打印试卷」打印的是下面筛选出的全部错题（答案可选）。
+          列出所选条件内的错题（同一道题错过多次时，任意一次落在时间范围内就会列出）。「AI
+          重新生成」出的变式题只在屏幕上练习，不入库；「打印试卷」打印的是下面筛选出的全部错题（答案可选）。
         </p>
         <div className="row">
           <label className="checkbox">
@@ -354,7 +378,13 @@ export function Practice({ healthReady }: Props) {
               >
                 {generating === problem.id ? '生成中…' : 'AI 重新生成'}
               </button>
-              {problem.wrongCount > 0 && <span className="muted small">错过 {problem.wrongCount} 次</span>}
+              {problem.wrongCount > 0 && (
+                <span className="muted small">
+                  错过 {problem.wrongCount} 次
+                  {problem.wrongTimes.length > 0 &&
+                    `（最近：${problem.wrongTimes.slice(0, 3).map(shortDate).join('、')}）`}
+                </span>
+              )}
             </footer>
           </article>
         ))}

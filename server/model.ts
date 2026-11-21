@@ -20,6 +20,8 @@ export type ProblemDraft = {
 export type Problem = ProblemDraft & {
   id: number;
   wrongCount: number;
+  /** 每次「又错了」的时间，倒序（最多 8 条） */
+  wrongTimes: string[];
   mastered: boolean;
   createdAt: string;
   updatedAt: string;
@@ -33,7 +35,9 @@ export type ProblemFilter = {
   knowledgePoint?: string;
   mastered?: boolean;
   q?: string;
-  /** ISO 时间，筛选发生时间在这之前/之后的错题 */
+  /** 至少错了几次 */
+  minWrongCount?: number;
+  /** ISO 时间，筛选发生在该时间之前/之后的错题（任意一次错误时间命中即可） */
   createdBefore?: string;
   createdAfter?: string;
 };

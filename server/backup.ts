@@ -65,6 +65,7 @@ export function importZip(repo: ProblemRepo, buffer: Buffer): ImportResult {
       imagePath: draft.imagePath && isImagePath(draft.imagePath) ? draft.imagePath : null,
       createdAt: draft.createdAt,
       wrongCount: draft.wrongCount,
+      wrongTimes: Array.isArray(draft.wrongTimes) ? draft.wrongTimes : undefined,
       mastered: draft.mastered,
     });
     imported += 1;

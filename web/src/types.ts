@@ -15,6 +15,7 @@ export type ProblemDraft = {
 export type Problem = ProblemDraft & {
   id: number;
   wrongCount: number;
+  wrongTimes: string[];
   mastered: boolean;
   createdAt: string;
   updatedAt: string;

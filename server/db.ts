@@ -7,7 +7,7 @@ import {
   type ProblemOption,
 } from './model.ts';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 type Row = Record<string, unknown>;
 
@@ -46,11 +46,22 @@ function rowToProblem(row: Row): Problem {
     source: String(row.source ?? ''),
     imagePath: row.image_path ? String(row.image_path) : null,
     wrongCount: Number(row.wrong_count ?? 0),
+    wrongTimes: row.wrong_times ? String(row.wrong_times).split('|').filter(Boolean) : [],
     mastered: Number(row.mastered ?? 0) === 1,
     createdAt: String(row.created_at ?? ''),
     updatedAt: String(row.updated_at ?? ''),
   };
 }
+
+/** 最近 8 次错误时间，倒序拼接，避免列表查询 N+1 */
+const WRONG_TIMES_SELECT = `(
+  SELECT group_concat(created_at, '|') FROM (
+    SELECT created_at FROM error_events
+    WHERE problem_id = problems.id
+    ORDER BY created_at DESC
+    LIMIT 8
+  )
+) AS wrong_times`;
 
 function likeEscape(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
@@ -80,14 +91,34 @@ function migrate(db: DatabaseSync): void {
       knowledge_points TEXT NOT NULL DEFAULT '[]',
       source TEXT NOT NULL DEFAULT '',
       image_path TEXT,
-      wrong_count INTEGER NOT NULL DEFAULT 0,
+      wrong_count INTEGER NOT NULL DEFAULT 1,
       mastered INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_problems_subject ON problems(subject);
     CREATE INDEX IF NOT EXISTS idx_problems_created ON problems(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS error_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      problem_id INTEGER NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_error_events_problem ON error_events(problem_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_error_events_time ON error_events(created_at);
   `);
+
+  if (version >= 1) {
+    // 老库升级：每道题补一条「记录时间」的错误记录，并把首次错误计入次数
+    db.exec(`
+      INSERT INTO error_events (problem_id, created_at)
+      SELECT problems.id, problems.created_at FROM problems
+      WHERE NOT EXISTS (SELECT 1 FROM error_events e WHERE e.problem_id = problems.id);
+
+      UPDATE problems SET wrong_count = wrong_count + 1;
+    `);
+  }
+
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
 }
 
@@ -111,7 +142,9 @@ export class ProblemRepo {
   }
 
   get(id: number): Problem | null {
-    const row = this.db.prepare('SELECT * FROM problems WHERE id = ?').get(id) as Row | undefined;
+    const row = this.db
+      .prepare(`SELECT problems.*, ${WRONG_TIMES_SELECT} FROM problems WHERE problems.id = ?`)
+      .get(id) as Row | undefined;
     return row ? rowToProblem(row) : null;
   }
 
@@ -122,33 +155,42 @@ export class ProblemRepo {
     const params: (string | number)[] = [];
 
     if (filter.subject) {
-      where.push('subject = ?');
+      where.push('problems.subject = ?');
       params.push(filter.subject);
     }
     if (filter.grade) {
-      where.push('grade = ?');
+      where.push('problems.grade = ?');
       params.push(filter.grade);
     }
     if (filter.knowledgePoint) {
-      where.push("knowledge_points LIKE ? ESCAPE '\\'");
+      where.push("problems.knowledge_points LIKE ? ESCAPE '\\'");
       params.push(`%${likeEscape(filter.knowledgePoint)}%`);
     }
     if (typeof filter.mastered === 'boolean') {
-      where.push('mastered = ?');
+      where.push('problems.mastered = ?');
       params.push(filter.mastered ? 1 : 0);
     }
+    if (typeof filter.minWrongCount === 'number' && filter.minWrongCount > 0) {
+      where.push('problems.wrong_count >= ?');
+      params.push(Math.floor(filter.minWrongCount));
+    }
+    // 时间过滤看「任意一次错误时间」，只要有一次落在区间内就命中
     if (filter.createdBefore) {
-      where.push('created_at <= ?');
+      where.push(
+        'EXISTS (SELECT 1 FROM error_events e WHERE e.problem_id = problems.id AND e.created_at <= ?)',
+      );
       params.push(filter.createdBefore);
     }
     if (filter.createdAfter) {
-      where.push('created_at >= ?');
+      where.push(
+        'EXISTS (SELECT 1 FROM error_events e WHERE e.problem_id = problems.id AND e.created_at >= ?)',
+      );
       params.push(filter.createdAfter);
     }
     if (filter.q) {
       const needle = `%${likeEscape(filter.q)}%`;
       where.push(
-        "(stem LIKE ? ESCAPE '\\' OR answer LIKE ? ESCAPE '\\' OR analysis LIKE ? ESCAPE '\\' OR knowledge_points LIKE ? ESCAPE '\\')",
+        "(problems.stem LIKE ? ESCAPE '\\' OR problems.answer LIKE ? ESCAPE '\\' OR problems.analysis LIKE ? ESCAPE '\\' OR problems.knowledge_points LIKE ? ESCAPE '\\')",
       );
       params.push(needle, needle, needle, needle);
     }
@@ -156,7 +198,9 @@ export class ProblemRepo {
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const totalRow = this.db.prepare(`SELECT COUNT(*) AS n FROM problems ${clause}`).get(...params) as Row;
     const rows = this.db
-      .prepare(`SELECT * FROM problems ${clause} ORDER BY id DESC LIMIT ? OFFSET ?`)
+      .prepare(
+        `SELECT problems.*, ${WRONG_TIMES_SELECT} FROM problems ${clause} ORDER BY problems.id DESC LIMIT ? OFFSET ?`,
+      )
       .all(...params, limit, offset) as Row[];
 
     return { items: rows.map(rowToProblem), total: Number(totalRow.n ?? 0) };
@@ -183,7 +227,7 @@ export class ProblemRepo {
       .prepare(
         `INSERT INTO problems
           (subject, grade, stem, options, answer, analysis, knowledge_points, source, image_path, wrong_count, mastered, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
       )
       .run(
         draft.subject,
@@ -198,7 +242,14 @@ export class ProblemRepo {
         timestamp,
         timestamp,
       );
-    return this.get(Number(result.lastInsertRowid)) as Problem;
+    const id = Number(result.lastInsertRowid);
+    this.addErrorEvent(id, timestamp);
+    return this.get(id) as Problem;
+  }
+
+  /** 记一次错误时间 */
+  addErrorEvent(problemId: number, at: string): void {
+    this.db.prepare('INSERT INTO error_events (problem_id, created_at) VALUES (?, ?)').run(problemId, at);
   }
 
   update(id: number, input: unknown): Problem | null {
@@ -234,7 +285,9 @@ export class ProblemRepo {
   markWrong(id: number): Problem | null {
     const existing = this.get(id);
     if (!existing) return null;
-    this.db.prepare('UPDATE problems SET wrong_count = wrong_count + 1, updated_at = ? WHERE id = ?').run(nowIso(), id);
+    const now = nowIso();
+    this.addErrorEvent(id, now);
+    this.db.prepare('UPDATE problems SET wrong_count = wrong_count + 1, updated_at = ? WHERE id = ?').run(now, id);
     return this.get(id);
   }
 
@@ -251,12 +304,21 @@ export class ProblemRepo {
   }
 
   all(): Problem[] {
-    const rows = this.db.prepare('SELECT * FROM problems ORDER BY id ASC').all() as Row[];
+    const rows = this.db
+      .prepare(`SELECT problems.*, ${WRONG_TIMES_SELECT} FROM problems ORDER BY problems.id ASC`)
+      .all() as Row[];
     return rows.map(rowToProblem);
   }
 
   /** 导入用：保留原始字段，只重新分配 id */
-  importDraft(draft: ProblemDraft & { createdAt?: string; wrongCount?: number; mastered?: boolean }): Problem {
+  importDraft(
+    draft: ProblemDraft & {
+      createdAt?: string;
+      wrongCount?: number;
+      wrongTimes?: string[];
+      mastered?: boolean;
+    },
+  ): Problem {
     const normalized = normalizeDraft(draft, { requireStem: true, requireAnswer: false });
     const timestamp = draft.createdAt || nowIso();
     const result = this.db
@@ -275,11 +337,16 @@ export class ProblemRepo {
         JSON.stringify(normalized.knowledgePoints),
         normalized.source,
         normalized.imagePath,
-        Number(draft.wrongCount ?? 0),
+        Number(draft.wrongCount ?? 1),
         draft.mastered ? 1 : 0,
         timestamp,
         timestamp,
       );
-    return this.get(Number(result.lastInsertRowid)) as Problem;
+    const id = Number(result.lastInsertRowid);
+    const times = Array.isArray(draft.wrongTimes) && draft.wrongTimes.length > 0 ? draft.wrongTimes : [timestamp];
+    for (const time of times) {
+      if (typeof time === 'string' && time) this.addErrorEvent(id, time);
+    }
+    return this.get(id) as Problem;
   }
 }

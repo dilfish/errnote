@@ -455,6 +455,13 @@ const day = 24 * 60 * 60 * 1000;
 for (const item of picked) {
   const daysAgo = int(0, 120);
   const createdAt = new Date(now - daysAgo * day - int(0, 20) * 60 * 60 * 1000).toISOString();
+  const wrongCount = random() < 0.45 ? int(1, 3) : 0;
+  // 每次错误给一个时间：首次是创建时间，其余落在创建时间和现在之间
+  const wrongTimes = [createdAt];
+  for (let i = 0; i < wrongCount; i += 1) {
+    const span = now - new Date(createdAt).getTime();
+    wrongTimes.push(new Date(new Date(createdAt).getTime() + Math.floor(random() * span)).toISOString());
+  }
   const draft = repo.importDraft({
     subject: item.subject,
     grade: pick(GRADES),
@@ -466,7 +473,8 @@ for (const item of picked) {
     source: SOURCE,
     imagePath: null,
     createdAt,
-    wrongCount: random() < 0.45 ? int(1, 3) : 0,
+    wrongCount: wrongCount + 1,
+    wrongTimes,
     mastered: random() < 0.3,
   });
   void draft;

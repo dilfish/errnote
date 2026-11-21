@@ -174,6 +174,7 @@ export function createApp(deps: AppDeps): (req: http.IncomingMessage, res: http.
         const masteredRaw = params.get('mastered');
         const before = params.get('before');
         const after = params.get('after');
+        const minWrongRaw = Number(params.get('minWrongCount') ?? 0);
         const result = repo.list({
           limit: Number(params.get('limit') ?? 20),
           offset: Number(params.get('offset') ?? 0),
@@ -181,6 +182,7 @@ export function createApp(deps: AppDeps): (req: http.IncomingMessage, res: http.
           grade: params.get('grade') ?? undefined,
           knowledgePoint: params.get('knowledgePoint') ?? undefined,
           mastered: masteredRaw === '1' || masteredRaw === 'true' ? true : masteredRaw === '0' || masteredRaw === 'false' ? false : undefined,
+          minWrongCount: Number.isFinite(minWrongRaw) && minWrongRaw > 0 ? minWrongRaw : undefined,
           q: params.get('q')?.trim() || undefined,
           createdBefore: before && !Number.isNaN(Date.parse(before)) ? new Date(before).toISOString() : undefined,
           createdAfter: after && !Number.isNaN(Date.parse(after)) ? new Date(after).toISOString() : undefined,

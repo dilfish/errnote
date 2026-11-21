@@ -17,6 +17,12 @@ function formatDate(value: string): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
+function shortDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 export function Library({ onChanged }: Props) {
   const [items, setItems] = useState<Problem[]>([]);
   const [total, setTotal] = useState(0);
@@ -245,7 +251,13 @@ export function Library({ onChanged }: Props) {
                     <p>{problem.analysis}</p>
                   </details>
                 )}
-                {problem.wrongCount > 0 && <p className="muted small">错过 {problem.wrongCount} 次</p>}
+                {problem.wrongCount > 0 && (
+                  <p className="muted small">
+                    错过 {problem.wrongCount} 次
+                    {problem.wrongTimes.length > 0 &&
+                      `（最近：${problem.wrongTimes.slice(0, 3).map(shortDate).join('、')}）`}
+                  </p>
+                )}
               </div>
             </div>
 
