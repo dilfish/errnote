@@ -1,5 +1,5 @@
 import { loadConfig, isTextAiReady, isVisionAiReady, type AiConfig, type HeaderMap } from './config.ts';
-import { normalizeDraftList, type Problem, type ProblemDraft } from './model.ts';
+import { normalizeDraftList, MAX_DRAFT_ITEMS, type Problem, type ProblemDraft } from './model.ts';
 import { readImageAsDataUrl } from './images.ts';
 import {
   DIFFICULTIES,
@@ -36,7 +36,7 @@ const SYSTEM_PROMPT = `你是一位中小学老师的错题整理助手，任务
 只输出一个 JSON 对象，禁止输出任何解释文字，禁止使用 markdown 代码块。
 
 JSON 结构：
-{"items":[{"subject":"","grade":"","problemType":"","stem":"","options":[{"key":"A","text":""}],"answer":"","analysis":"","knowledgePoints":[""]}]}
+{"items":[{"subject":"","grade":"","problemType":"","stem":"","options":[{"key":"A","text":""}],"answer":"","analysis":"","knowledgePoints":[""],"bbox":[0.04,0.31,0.96,0.52]}]}
 
 字段要求：
 1. subject：只能从 语文、数学、英语、物理、化学、生物、政治、历史、地理、科学、其他 里选一个。
@@ -48,11 +48,15 @@ JSON 结构：
 7. analysis：2~4 句解题思路，点出关键步骤。
 8. knowledgePoints：1~4 个具体知识点，例如"一元二次方程判别式""现在完成时"，不要写"数学""英语"这类宽泛的词。
 9. 不要编造题目里不存在的条件；看不清的字用"□"代替，不要猜。
+10. bbox：输入是图片时，给出这道题在原图中的矩形位置 [左, 上, 右, 下]，用 0~1 的相对比例（整张图宽高各算 1），框住题干、选项和作答区域；判断不出就输出 []。文字输入时输出 []。
 
-items 最多 5 道题，按原图顺序排列。`;
+拆题要求：
+- 一张图片/一段文字里有多道题时（看题号、小题号、分栏、明显空白），必须拆成多条 items，一道题一条，按从上到下、从左到右的顺序排列；不要合并成一道，也不要漏掉。
+- 小题（如"（1）（2）（3）"）属于同一道大题时合并在一条里，除非它们各自独立成题。
+- items 最多 ${MAX_DRAFT_ITEMS} 道；题目更多时优先保留完整、清晰的题目。`;
 
 const IMAGE_PROMPT =
-  '请识别图片中的题目，整理成约定的 JSON。图片里有多道题就按顺序全部输出（最多 5 道）。如果图片看不清、不是题目或没有可识别内容，items 输出 []。';
+  `请识别图片里的所有题目，按题号切分，逐题整理成约定的 JSON，并给出每道题的 bbox。图片里有多少道题就输出多少条（最多 ${MAX_DRAFT_ITEMS} 道），不要只输出第一道。如果图片看不清、不是题目或没有可识别内容，items 输出 []。`;
 
 const TEXT_PROMPT = (text: string) =>
   `请把下面的题目整理成约定的 JSON，并补全答案、解析和知识点：\n\n${text}`;
@@ -304,7 +308,9 @@ export async function extractProblems(input: ExtractInput): Promise<ExtractResul
     throw new AiError('请先上传图片或输入题目文字', 400, 'NO_INPUT');
   }
 
-  const config = loadConfig();
+  const loaded = loadConfig();
+  // 一次可能识别整页几十道题，给足生成时间（config 里的 timeoutMs 作为下限）
+  const config: AiConfig = { ...loaded, timeoutMs: Math.max(loaded.timeoutMs, 240_000) };
 
   if (imagePath || dataUrl) {
     if (!isVisionAiReady(config)) {

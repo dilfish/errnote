@@ -5,6 +5,12 @@
 
 export type ProblemOption = { key: string; text: string };
 
+/** 题目在原图里的位置：[x1, y1, x2, y2]，0~1 的相对比例 */
+export type BoundingBox = [number, number, number, number];
+
+/** 一次识别最多返回几道题（一张试卷可能几十道，上限放宽到 50） */
+export const MAX_DRAFT_ITEMS = 50;
+
 export type ProblemDraft = {
   subject: string;
   grade: string;
@@ -18,6 +24,8 @@ export type ProblemDraft = {
   knowledgePoints: string[];
   source: string;
   imagePath: string | null;
+  /** 只有图片识别会给出，用于前端把原图切成单题；不落库 */
+  bbox?: BoundingBox | null;
 };
 
 export type Problem = ProblemDraft & {
@@ -144,6 +152,28 @@ function normalizeImagePath(raw: unknown): string | null {
   return null;
 }
 
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * 把 AI 给的各种 bounding box 写法统一成 0~1 的 [x1,y1,x2,y2]。
+ * 兼容 0~1、0~100、0~1000 三种常见量纲，也兼容 x2<x1 的写反。
+ */
+export function normalizeBbox(raw: unknown): BoundingBox | null {
+  if (!Array.isArray(raw) || raw.length < 4) return null;
+  const numbers = raw.slice(0, 4).map((value) => (typeof value === 'string' ? Number(value) : value));
+  if (!numbers.every((value): value is number => typeof value === 'number' && Number.isFinite(value))) return null;
+  const max = Math.max(...numbers.map(Math.abs));
+  const scale = max <= 1 ? 1 : max <= 100 ? 100 : max <= 1000 ? 1000 : max;
+  let [x1, y1, x2, y2] = numbers.map((value) => clamp01(value / scale)) as BoundingBox;
+  if (x2 < x1) [x1, x2] = [x2, x1];
+  if (y2 < y1) [y1, y2] = [y2, y1];
+  if (x2 - x1 < 0.01 || y2 - y1 < 0.01) return null;
+  const round = (value: number) => Math.round(value * 10000) / 10000;
+  return [round(x1), round(y1), round(x2), round(y2)];
+}
+
 export type NormalizeOptions = {
   requireStem?: boolean;
   requireAnswer?: boolean;
@@ -171,6 +201,7 @@ export function normalizeDraft(raw: unknown, options: NormalizeOptions = {}): Pr
     ),
     source: trimAll(obj.source).slice(0, 40),
     imagePath: normalizeImagePath(obj.imagePath ?? obj.image_path),
+    bbox: normalizeBbox(obj.bbox ?? obj.box ?? obj.bounds ?? obj.rect ?? obj.region),
   };
   if (requireStem && !draft.stem) {
     throw new ValidationError('题干不能为空');
@@ -185,7 +216,11 @@ export function normalizeDraft(raw: unknown, options: NormalizeOptions = {}): Pr
  * 从 AI 返回的 JSON 里取出题目数组。
  * 兼容 {items:[...]}、{questions:[...]}、裸数组、单个对象。
  */
-export function normalizeDraftList(raw: unknown, requireStem = false): ProblemDraft[] {
+export function normalizeDraftList(
+  raw: unknown,
+  requireStem = false,
+  limit = MAX_DRAFT_ITEMS,
+): ProblemDraft[] {
   const obj = raw as Record<string, unknown> | unknown[] | null;
   let list: unknown[] = [];
   if (Array.isArray(obj)) list = obj;
@@ -202,7 +237,7 @@ export function normalizeDraftList(raw: unknown, requireStem = false): ProblemDr
     const draft = normalizeDraft(item, { requireStem, requireAnswer: false });
     if (!draft.stem) continue;
     drafts.push(draft);
-    if (drafts.length >= 5) break;
+    if (drafts.length >= Math.max(1, limit)) break;
   }
   return drafts;
 }

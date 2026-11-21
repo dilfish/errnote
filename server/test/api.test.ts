@@ -31,7 +31,7 @@ async function listen(handler: http.RequestListener): Promise<Server> {
 
 /** 假的 OpenAI 兼容服务：通过 state.mode 控制返回值 */
 type FakeState = {
-  mode: 'ok' | 'badjson' | 'nojsonformat' | 'http500' | 'missingSession';
+  mode: 'ok' | 'multi' | 'many' | 'badjson' | 'nojsonformat' | 'http500' | 'missingSession';
   calls: number;
   lastBody: Record<string, unknown> | null;
   lastHeaders: Record<string, string | string[] | undefined>;
@@ -81,20 +81,64 @@ function startFakeAi(): Promise<Server> {
         fake.mode === 'badjson'
           ? '抱歉，我看不清这张图。'
           : JSON.stringify({
-              items: [
-                {
-                  subject: '数学',
-                  grade: '三年级',
-                  stem: '小明有 5 个苹果，吃了 2 个，还剩几个？',
-                  options: [
-                    { key: 'A', text: '2' },
-                    { key: 'B', text: '3' },
-                  ],
-                  answer: 'B',
-                  analysis: '5 - 2 = 3。',
-                  knowledgePoints: ['10 以内减法'],
-                },
-              ],
+              items:
+                fake.mode === 'many'
+                  ? Array.from({ length: 55 }, (_, index) => ({
+                      subject: '数学',
+                      grade: '四年级',
+                      stem: `${index + 1}. ${index + 100} + ${index} = ?`,
+                      options: [],
+                      answer: String(index + 100 + index),
+                      analysis: '按位相加。',
+                      knowledgePoints: ['加法'],
+                    }))
+                  : fake.mode === 'multi'
+                  ? [
+                      {
+                        subject: '数学',
+                        grade: '三年级',
+                        stem: '1. 计算：12 + 7 = ?',
+                        options: [],
+                        answer: '19',
+                        analysis: '个位相加。',
+                        knowledgePoints: ['两位数加法'],
+                        bbox: [40, 100, 960, 250],
+                      },
+                      {
+                        subject: '数学',
+                        grade: '三年级',
+                        stem: '2. 计算：30 - 8 = ?',
+                        options: [],
+                        answer: '22',
+                        analysis: '退位减法。',
+                        knowledgePoints: ['退位减法'],
+                        bbox: [40, 300, 960, 470],
+                      },
+                      {
+                        subject: '数学',
+                        grade: '三年级',
+                        stem: '3. 计算：6 × 4 = ?',
+                        options: [],
+                        answer: '24',
+                        analysis: '乘法口诀。',
+                        knowledgePoints: ['表内乘法'],
+                        bbox: [40, 520, 960, 690],
+                      },
+                    ]
+                  : [
+                      {
+                        subject: '数学',
+                        grade: '三年级',
+                        stem: '小明有 5 个苹果，吃了 2 个，还剩几个？',
+                        options: [
+                          { key: 'A', text: '2' },
+                          { key: 'B', text: '3' },
+                        ],
+                        answer: 'B',
+                        analysis: '5 - 2 = 3。',
+                        knowledgePoints: ['10 以内减法'],
+                      },
+                    ],
             });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }));
@@ -568,8 +612,35 @@ describe('AI 识别（OpenAI 兼容）', () => {
     assert.ok(parts.some((part) => part.type === 'image_url' && part.image_url?.url.startsWith('data:image/jpeg;base64,')));
   });
 
-  it('服务商不支持 response_format 时自动降级重试', async () => {
-    fake.mode = 'nojsonformat';
+  it('一张图多道题时逐题返回，并把 bbox 统一成 0~1 比例', async () => {
+    fake.mode = 'multi';
+    const upload = await call<{ path: string }>('/api/images', { method: 'POST', json: { dataUrl: tinyJpegDataUrl() } });
+    const { status, body } = await call<{
+      items: { stem: string; answer: string; bbox: [number, number, number, number] | null }[];
+    }>('/api/ai/extract', { method: 'POST', json: { imagePath: upload.body.path } });
+    assert.equal(status, 200);
+    assert.equal(body.items.length, 3);
+    assert.match(body.items[0].stem, /12 \+ 7/);
+    assert.match(body.items[2].stem, /6 × 4/);
+    // 模型给的是 0~1000 量纲，接口返回时要缩到 0~1
+    assert.deepEqual(body.items[0].bbox, [0.04, 0.1, 0.96, 0.25]);
+    assert.deepEqual(body.items[2].bbox, [0.04, 0.52, 0.96, 0.69]);
+  });
+
+  it('题目很多时按上限截断到 50 道', async () => {
+    fake.mode = 'many';
+    const upload = await call<{ path: string }>('/api/images', { method: 'POST', json: { dataUrl: tinyJpegDataUrl() } });
+    const { status, body } = await call<{ items: { stem: string }[] }>('/api/ai/extract', {
+      method: 'POST',
+      json: { imagePath: upload.body.path },
+    });
+    assert.equal(status, 200);
+    assert.equal(body.items.length, 50);
+    assert.match(body.items[0].stem, /^1\. 100/);
+    assert.match(body.items[49].stem, /^50\. 149/);
+  });
+
+  it('服务商不支持 response_format 时自动降级重试', async () => {    fake.mode = 'nojsonformat';
     fake.calls = 0;
     const { status, body } = await call<{ items: unknown[] }>('/api/ai/extract', {
       method: 'POST',

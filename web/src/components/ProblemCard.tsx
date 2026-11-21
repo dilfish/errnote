@@ -7,12 +7,19 @@ type Props = {
   title?: string;
   saving?: boolean;
   saved?: boolean;
+  /** 已入库的题目 id（加题目页保存后用于折叠展示） */
+  savedId?: number;
+  /** 折叠成一行摘要，点「继续编辑」展开 */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
   error?: string;
   onChange: (patch: Partial<ProblemForm>) => void;
   onSave: () => void;
   onDiscard?: () => void;
   onDelete?: () => void;
   imagePreview?: string | null;
+  /** 切分前的整张原图，方便对照 */
+  sourceImage?: string | null;
 };
 
 export function ProblemCard({
@@ -20,15 +27,20 @@ export function ProblemCard({
   title,
   saving,
   saved,
+  savedId,
+  collapsed,
+  onToggleCollapse,
   error,
   onChange,
   onSave,
   onDiscard,
   onDelete,
   imagePreview,
+  sourceImage,
 }: Props) {
   const knowledge = splitKnowledge(form.knowledgeText);
   const preview = imagePreview ?? form.imagePath;
+  const fullImage = sourceImage && sourceImage !== preview ? sourceImage : null;
   // 老数据/AI 给出列表外的值时，保留原值避免被清空
   const gradeOptions = form.grade && !GRADES.includes(form.grade) ? [form.grade, ...GRADES] : GRADES;
   const unitOptions = form.unit && !UNITS.includes(form.unit) ? [form.unit, ...UNITS] : UNITS;
@@ -39,22 +51,63 @@ export function ProblemCard({
       ? [form.problemType, ...PROBLEM_TYPES]
       : PROBLEM_TYPES;
 
+  if (collapsed) {
+    const summary = form.stem.replace(/\s+/g, ' ').trim();
+    return (
+      <section className="card problem-card is-saved problem-card--collapsed">
+        <header className="problem-card__head">
+          <h3>{title ?? (savedId ? `#${savedId}` : '已保存的题目')}</h3>
+          <div className="problem-card__head-right">
+            {savedId !== undefined && <span className="badge badge--ok">已保存 #{savedId}</span>}
+            {onToggleCollapse && (
+              <button type="button" className="btn btn--sm" onClick={onToggleCollapse}>
+                继续编辑
+              </button>
+            )}
+          </div>
+        </header>
+        <p className="problem-card__summary">
+          {form.subject && <span className="chip chip--subject">{form.subject}</span>}
+          <span>
+            {summary ? `${summary.slice(0, 80)}${summary.length > 80 ? '…' : ''}` : '（题干为空）'}
+          </span>
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className={`card problem-card${saved ? ' is-saved' : ''}`}>
       <header className="problem-card__head">
         <h3>{title ?? (form.id ? `编辑 #${form.id}` : '待保存的题目')}</h3>
         <div className="problem-card__head-right">
-          {form.id && <span className="badge badge--id">#{form.id}</span>}
-          {saved && <span className="badge badge--ok">已入库</span>}
+          {savedId !== undefined ? (
+            <span className="badge badge--ok">已保存 #{savedId}</span>
+          ) : (
+            <>
+              {form.id && <span className="badge badge--id">#{form.id}</span>}
+              {saved && <span className="badge badge--ok">已入库</span>}
+            </>
+          )}
         </div>
       </header>
 
       <div className="problem-card__body">
-        {preview && (
-          <a className="thumb" href={preview} target="_blank" rel="noreferrer">
-            <img src={preview} alt="题目图片" />
-            <span>查看原图</span>
-          </a>
+        {(preview || fullImage) && (
+          <div className="problem-card__media">
+            {preview && (
+              <a className="thumb" href={preview} target="_blank" rel="noreferrer">
+                <img src={preview} alt="题目图片" />
+                <span>{fullImage ? '本题切图' : '查看原图'}</span>
+              </a>
+            )}
+            {fullImage && (
+              <a className="thumb thumb--sm" href={fullImage} target="_blank" rel="noreferrer">
+                <img src={fullImage} alt="整张原图" />
+                <span>整张原图</span>
+              </a>
+            )}
+          </div>
         )}
 
         <div className="field-row">
@@ -203,6 +256,11 @@ export function ProblemCard({
         {onDiscard && (
           <button type="button" className="btn" onClick={onDiscard} disabled={saving}>
             丢弃
+          </button>
+        )}
+        {savedId !== undefined && onToggleCollapse && (
+          <button type="button" className="btn btn--ghost" onClick={onToggleCollapse} disabled={saving}>
+            收起
           </button>
         )}
         {onDelete && (

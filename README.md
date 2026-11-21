@@ -103,6 +103,8 @@ data/
 1. 打开「加题目」
 2. 手机点「拍照」，电脑点「选图片」；图片会自动压到长边 1280、约 100~300KB
 3. AI 自动识别出题干、选项、答案、解析、知识点、题型，**逐个卡片核对，改完点保存**
+   - **一张图里有多道题**时会按题号自动切成多道（一次最多 50 道），每道题一张单题小图 + 一张卡片；逐题编辑、逐题保存，也可以「全部保存」
+   - 保存后卡片会收成一行摘要，点「继续编辑」还能接着改；「整张原图」链接用来对照切图位置
    - 卡片上还能补「学期 / 单元 / 题型 / 已掌握」，这些是给筛选和打印用的
    - 题干和答案都必填；没解出来可以先写「待解」，或先点「AI 整理」让它补
 4. 也可以把文字粘到第二个框里，点「AI 整理文字」
@@ -161,7 +163,8 @@ server/          后端（零框架，Node 内置 http + node:sqlite）
   backup.ts      zip 导出/导入
 web/             前端（React + Vite）
   src/pages/Practice.tsx     错题练习：按学科/时间筛选 + AI 重出题
-  src/pages/AddProblem.tsx   拍照/文字 → AI → 入库
+  src/pages/AddProblem.tsx   拍照/文字 → AI → 入库（一图多题自动切分）
+  src/crop.ts                按 AI 给的 bbox 把原图裁成单题小图
   src/pages/Library.tsx      题库列表
   src/pages/Settings.tsx     提示词编辑
   src/components/ProblemCard.tsx  可编辑题目卡片

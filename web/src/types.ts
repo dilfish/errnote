@@ -13,6 +13,8 @@ export type ProblemDraft = {
   knowledgePoints: string[];
   source: string;
   imagePath: string | null;
+  /** 图片识别时 AI 给出的题目位置 [x1,y1,x2,y2]，0~1 相对比例 */
+  bbox?: [number, number, number, number] | null;
 };
 
 export type Problem = ProblemDraft & {
@@ -87,6 +89,9 @@ export const UNITS = [
 ];
 
 export const PROBLEM_TYPES = ['选择题', '填空题', '判断题', '计算题', '解答题', '应用题', '其他'];
+
+/** 一次识别最多几道题（和服务端 MAX_DRAFT_ITEMS 保持一致） */
+export const MAX_DRAFT_ITEMS = 50;
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 

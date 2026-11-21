@@ -504,6 +504,60 @@ select:focus {
   border-color: #bbf7d0;
 }
 
+.problem-card__media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.problem-card--collapsed .problem-card__head {
+  margin-bottom: 0;
+}
+
+.problem-card__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 6px 0 0;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.draft-slot {
+  scroll-margin-top: 12px;
+}
+
+.draft-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.draft-jump__item {
+  appearance: none;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.draft-jump__item:hover {
+  border-color: var(--primary);
+}
+
+.draft-jump__item.is-done {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: var(--ok);
+}
+
 .problem-card__head {
   display: flex;
   align-items: center;
