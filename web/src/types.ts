@@ -3,6 +3,9 @@ export type ProblemOption = { key: string; text: string };
 export type ProblemDraft = {
   subject: string;
   grade: string;
+  unit: string;
+  semester: string;
+  problemType: string;
   stem: string;
   options: ProblemOption[];
   answer: string;
@@ -65,6 +68,23 @@ export const SUBJECTS = [
 
 /** 年级下拉选项：三年级 ~ 六年级 */
 export const GRADES = ['三年级', '四年级', '五年级', '六年级'];
+
+export const SEMESTERS = ['上学期', '下学期'];
+
+export const UNITS = [
+  '第一单元',
+  '第二单元',
+  '第三单元',
+  '第四单元',
+  '第五单元',
+  '第六单元',
+  '第七单元',
+  '第八单元',
+  '期中复习',
+  '期末复习',
+];
+
+export const PROBLEM_TYPES = ['选择题', '填空题', '判断题', '计算题', '解答题', '应用题', '其他'];
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 

@@ -1,6 +1,8 @@
 export type PrintQuestion = {
   subject: string;
   grade: string;
+  unit?: string;
+  problemType?: string;
   stem: string;
   options: { key: string; text: string }[];
   answer: string;
@@ -38,7 +40,7 @@ export function buildPaperHtml(questions: PrintQuestion[], options: PrintOptions
 
   const body = questions
     .map((item, index) => {
-      const meta = [item.subject, item.grade, item.difficulty].filter(Boolean).join(' · ');
+      const meta = [item.subject, item.grade, item.unit, item.problemType, item.difficulty].filter(Boolean).join(' · ');
       const optionsHtml = item.options.length
         ? `<ul class="options">${item.options
             .map((option) => `<li><b>${esc(option.key)}.</b> ${esc(option.text)}</li>`)

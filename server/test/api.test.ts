@@ -378,12 +378,50 @@ describe('题库存取与筛选', () => {
     assert.equal(item?.wrongCount, 1, '首次错误应计入次数');
     assert.equal(item?.wrongTimes.length, 1);
     assert.equal(item?.wrongTimes[0], oldTime);
+    assert.equal(item?.unit, '', '新列默认空字符串');
+    assert.equal(item?.semester, '');
+    assert.equal(item?.problemType, '');
     const recent = migrated.list({
       createdAfter: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
     });
     assert.equal(recent.total, 0, '20 天前的题不该出现在最近 5 天里');
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('单元/学期/题型/已掌握可以写入与修改', async () => {
+    const created = await call<{
+      item: { id: number; unit: string; semester: string; problemType: string; mastered: boolean };
+    }>('/api/problems', {
+      method: 'POST',
+      json: {
+        subject: '数学',
+        grade: '三年级',
+        unit: '第三单元',
+        semester: '上学期',
+        problemType: '选择题',
+        stem: '属性测试题',
+        answer: 'A',
+        mastered: true,
+      },
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.item.unit, '第三单元');
+    assert.equal(created.body.item.semester, '上学期');
+    assert.equal(created.body.item.problemType, '选择题');
+    assert.equal(created.body.item.mastered, true);
+
+    const updated = await call<{ item: { mastered: boolean; unit: string } }>(
+      `/api/problems/${created.body.item.id}`,
+      { method: 'PUT', json: { mastered: false, unit: '第四单元' } },
+    );
+    assert.equal(updated.body.item.mastered, false);
+    assert.equal(updated.body.item.unit, '第四单元');
+
+    const active = await call<{ total: number }>(
+      `/api/problems?subject=${encodeURIComponent('数学')}&q=${encodeURIComponent('属性测试题')}&mastered=0`,
+    );
+    assert.equal(active.body.total, 1);
   });
 
   it('重开数据库后题目与图片条数不变', async () => {    const before = repo.count();

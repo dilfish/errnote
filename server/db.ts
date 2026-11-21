@@ -7,7 +7,7 @@ import {
   type ProblemOption,
 } from './model.ts';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 type Row = Record<string, unknown>;
 
@@ -43,6 +43,9 @@ function rowToProblem(row: Row): Problem {
     answer: String(row.answer ?? ''),
     analysis: String(row.analysis ?? ''),
     knowledgePoints: parseKnowledge(row.knowledge_points),
+    unit: String(row.unit ?? ''),
+    semester: String(row.semester ?? ''),
+    problemType: String(row.problem_type ?? ''),
     source: String(row.source ?? ''),
     imagePath: row.image_path ? String(row.image_path) : null,
     wrongCount: Number(row.wrong_count ?? 0),
@@ -89,6 +92,9 @@ function migrate(db: DatabaseSync): void {
       answer TEXT NOT NULL DEFAULT '',
       analysis TEXT NOT NULL DEFAULT '',
       knowledge_points TEXT NOT NULL DEFAULT '[]',
+      unit TEXT NOT NULL DEFAULT '',
+      semester TEXT NOT NULL DEFAULT '',
+      problem_type TEXT NOT NULL DEFAULT '',
       source TEXT NOT NULL DEFAULT '',
       image_path TEXT,
       wrong_count INTEGER NOT NULL DEFAULT 1,
@@ -109,14 +115,27 @@ function migrate(db: DatabaseSync): void {
   `);
 
   if (version >= 1) {
-    // 老库升级：每道题补一条「记录时间」的错误记录，并把首次错误计入次数
-    db.exec(`
-      INSERT INTO error_events (problem_id, created_at)
-      SELECT problems.id, problems.created_at FROM problems
-      WHERE NOT EXISTS (SELECT 1 FROM error_events e WHERE e.problem_id = problems.id);
+    // 老库升级：补上单元/学期/题型三列
+    const columns = new Set(
+      (db.prepare('PRAGMA table_info(problems)').all() as Row[]).map((row) => String(row.name)),
+    );
+    const addColumn = (name: string, definition: string) => {
+      if (!columns.has(name)) db.exec(`ALTER TABLE problems ADD COLUMN ${definition}`);
+    };
+    addColumn('unit', "unit TEXT NOT NULL DEFAULT ''");
+    addColumn('semester', "semester TEXT NOT NULL DEFAULT ''");
+    addColumn('problem_type', "problem_type TEXT NOT NULL DEFAULT ''");
 
-      UPDATE problems SET wrong_count = wrong_count + 1;
-    `);
+    if (version === 1) {
+      // v1 → v2：每道题补一条「记录时间」的错误记录，并把首次错误计入次数
+      db.exec(`
+        INSERT INTO error_events (problem_id, created_at)
+        SELECT problems.id, problems.created_at FROM problems
+        WHERE NOT EXISTS (SELECT 1 FROM error_events e WHERE e.problem_id = problems.id);
+
+        UPDATE problems SET wrong_count = wrong_count + 1;
+      `);
+    }
   }
 
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
@@ -221,13 +240,15 @@ export class ProblemRepo {
   }
 
   create(input: unknown, extra?: { source?: string; imagePath?: string | null }): Problem {
-    const draft = normalizeDraft({ ...(input as object), ...extra }, { requireStem: true, requireAnswer: true });
+    const raw = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+    const draft = normalizeDraft({ ...raw, ...extra }, { requireStem: true, requireAnswer: true });
+    const mastered = raw.mastered === true || raw.mastered === 1 ? 1 : 0;
     const timestamp = nowIso();
     const result = this.db
       .prepare(
         `INSERT INTO problems
-          (subject, grade, stem, options, answer, analysis, knowledge_points, source, image_path, wrong_count, mastered, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+          (subject, grade, stem, options, answer, analysis, knowledge_points, unit, semester, problem_type, source, image_path, wrong_count, mastered, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
       )
       .run(
         draft.subject,
@@ -237,8 +258,12 @@ export class ProblemRepo {
         draft.answer,
         draft.analysis,
         JSON.stringify(draft.knowledgePoints),
+        draft.unit,
+        draft.semester,
+        draft.problemType,
         draft.source,
         draft.imagePath,
+        mastered,
         timestamp,
         timestamp,
       );
@@ -255,14 +280,17 @@ export class ProblemRepo {
   update(id: number, input: unknown): Problem | null {
     const existing = this.get(id);
     if (!existing) return null;
+    const raw = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
     const draft: ProblemDraft = normalizeDraft(
-      { ...existing, ...(input as object) },
+      { ...existing, ...raw },
       { requireStem: true, requireAnswer: true },
     );
+    const mastered =
+      raw.mastered === undefined ? (existing.mastered ? 1 : 0) : raw.mastered === true || raw.mastered === 1 ? 1 : 0;
     this.db
       .prepare(
         `UPDATE problems SET subject=?, grade=?, stem=?, options=?, answer=?, analysis=?,
-           knowledge_points=?, source=?, image_path=?, wrong_count=?, mastered=?, updated_at=? WHERE id=?`,
+           knowledge_points=?, unit=?, semester=?, problem_type=?, source=?, image_path=?, wrong_count=?, mastered=?, updated_at=? WHERE id=?`,
       )
       .run(
         draft.subject,
@@ -272,10 +300,13 @@ export class ProblemRepo {
         draft.answer,
         draft.analysis,
         JSON.stringify(draft.knowledgePoints),
+        draft.unit,
+        draft.semester,
+        draft.problemType,
         draft.source,
         draft.imagePath,
         existing.wrongCount,
-        existing.mastered ? 1 : 0,
+        mastered,
         nowIso(),
         id,
       );
@@ -312,7 +343,8 @@ export class ProblemRepo {
 
   /** 导入用：保留原始字段，只重新分配 id */
   importDraft(
-    draft: ProblemDraft & {
+    draft: Partial<ProblemDraft> & {
+      stem: string;
       createdAt?: string;
       wrongCount?: number;
       wrongTimes?: string[];
@@ -324,8 +356,8 @@ export class ProblemRepo {
     const result = this.db
       .prepare(
         `INSERT INTO problems
-          (subject, grade, stem, options, answer, analysis, knowledge_points, source, image_path, wrong_count, mastered, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (subject, grade, stem, options, answer, analysis, knowledge_points, unit, semester, problem_type, source, image_path, wrong_count, mastered, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         normalized.subject,
@@ -335,6 +367,9 @@ export class ProblemRepo {
         normalized.answer,
         normalized.analysis,
         JSON.stringify(normalized.knowledgePoints),
+        normalized.unit,
+        normalized.semester,
+        normalized.problemType,
         normalized.source,
         normalized.imagePath,
         Number(draft.wrongCount ?? 1),

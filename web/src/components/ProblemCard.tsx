@@ -1,6 +1,6 @@
 import type { ProblemForm } from '../form';
 import { splitKnowledge } from '../form';
-import { GRADES, SUBJECTS } from '../types';
+import { GRADES, PROBLEM_TYPES, SEMESTERS, SUBJECTS, UNITS } from '../types';
 
 type Props = {
   form: ProblemForm;
@@ -29,8 +29,15 @@ export function ProblemCard({
 }: Props) {
   const knowledge = splitKnowledge(form.knowledgeText);
   const preview = imagePreview ?? form.imagePath;
-  // 老数据/AI 给出列表外的年级时，保留原值避免被清空
+  // 老数据/AI 给出列表外的值时，保留原值避免被清空
   const gradeOptions = form.grade && !GRADES.includes(form.grade) ? [form.grade, ...GRADES] : GRADES;
+  const unitOptions = form.unit && !UNITS.includes(form.unit) ? [form.unit, ...UNITS] : UNITS;
+  const semesterOptions =
+    form.semester && !SEMESTERS.includes(form.semester) ? [form.semester, ...SEMESTERS] : SEMESTERS;
+  const typeOptions =
+    form.problemType && !PROBLEM_TYPES.includes(form.problemType)
+      ? [form.problemType, ...PROBLEM_TYPES]
+      : PROBLEM_TYPES;
 
   return (
     <section className={`card problem-card${saved ? ' is-saved' : ''}`}>
@@ -80,6 +87,52 @@ export function ProblemCard({
             <option key={subject} value={subject} />
           ))}
         </datalist>
+
+        <div className="field-row">
+          <label className="field field--sm">
+            <span>学期</span>
+            <select value={form.semester} onChange={(event) => onChange({ semester: event.target.value })}>
+              <option value="">未填</option>
+              {semesterOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field field--sm">
+            <span>单元</span>
+            <select value={form.unit} onChange={(event) => onChange({ unit: event.target.value })}>
+              <option value="">未填</option>
+              {unitOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field field--sm">
+            <span>题型</span>
+            <select value={form.problemType} onChange={(event) => onChange({ problemType: event.target.value })}>
+              <option value="">未填</option>
+              {typeOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field field--sm">
+            <span>状态</span>
+            <select
+              value={form.mastered ? '1' : '0'}
+              onChange={(event) => onChange({ mastered: event.target.value === '1' })}
+            >
+              <option value="0">未掌握</option>
+              <option value="1">已掌握</option>
+            </select>
+          </label>
+        </div>
 
         <label className="field">
           <span>题干</span>

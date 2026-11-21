@@ -6,6 +6,10 @@ export type ProblemForm = {
   imagePath: string | null;
   subject: string;
   grade: string;
+  unit: string;
+  semester: string;
+  problemType: string;
+  mastered: boolean;
   stem: string;
   optionsText: string;
   answer: string;
@@ -43,6 +47,10 @@ export function emptyForm(): ProblemForm {
     imagePath: null,
     subject: '',
     grade: '',
+    unit: '',
+    semester: '',
+    problemType: '',
+    mastered: false,
     stem: '',
     optionsText: '',
     answer: '',
@@ -57,6 +65,10 @@ export function formFromDraft(draft: ProblemDraft, key = newKey()): ProblemForm 
     imagePath: draft.imagePath ?? null,
     subject: draft.subject ?? '',
     grade: draft.grade ?? '',
+    unit: draft.unit ?? '',
+    semester: draft.semester ?? '',
+    problemType: draft.problemType ?? '',
+    mastered: false,
     stem: draft.stem ?? '',
     optionsText: optionsToText(draft.options ?? []),
     answer: draft.answer ?? '',
@@ -66,13 +78,16 @@ export function formFromDraft(draft: ProblemDraft, key = newKey()): ProblemForm 
 }
 
 export function formFromProblem(problem: Problem): ProblemForm {
-  return { ...formFromDraft(problem), id: problem.id };
+  return { ...formFromDraft(problem), id: problem.id, mastered: problem.mastered };
 }
 
-export function formToPayload(form: ProblemForm): ProblemDraft & { source: string } {
+export function formToPayload(form: ProblemForm): ProblemDraft & { source: string; mastered: boolean } {
   return {
     subject: form.subject.trim(),
     grade: form.grade.trim(),
+    unit: form.unit.trim(),
+    semester: form.semester.trim(),
+    problemType: form.problemType.trim(),
     stem: form.stem.trim(),
     options: parseOptionsText(form.optionsText),
     answer: form.answer.trim(),
@@ -83,6 +98,7 @@ export function formToPayload(form: ProblemForm): ProblemDraft & { source: strin
       .filter(Boolean),
     imagePath: form.imagePath,
     source: form.id ? '手动编辑' : '手动录入',
+    mastered: form.mastered,
   };
 }
 

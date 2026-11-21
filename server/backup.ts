@@ -56,6 +56,9 @@ export function importZip(repo: ProblemRepo, buffer: Buffer): ImportResult {
     repo.importDraft({
       subject: draft.subject ?? '',
       grade: draft.grade ?? '',
+      unit: draft.unit ?? '',
+      semester: draft.semester ?? '',
+      problemType: draft.problemType ?? '',
       stem: draft.stem,
       options: Array.isArray(draft.options) ? draft.options : [],
       answer: draft.answer ?? '',

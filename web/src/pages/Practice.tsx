@@ -103,6 +103,7 @@ export function Practice({ healthReady }: Props) {
         if (subject) params.set('subject', subject);
         if (grade) params.set('grade', grade);
         if (minWrong) params.set('minWrongCount', minWrong);
+        params.set('mastered', '0');
         if (range.days) params.set('after', daysAgo(range.days));
         const result = await api<ProblemListResponse>(`/api/problems?${params.toString()}`);
         setTotal(result.total);
@@ -171,6 +172,7 @@ export function Practice({ healthReady }: Props) {
         if (subject) params.set('subject', subject);
         if (grade) params.set('grade', grade);
         if (minWrong) params.set('minWrongCount', minWrong);
+        params.set('mastered', '0');
         if (range.days) params.set('after', daysAgo(range.days));
         const result = await api<ProblemListResponse>(`/api/problems?${params.toString()}`);
         collected.push(...result.items);
@@ -185,6 +187,8 @@ export function Practice({ healthReady }: Props) {
         collected.map((problem) => ({
           subject: problem.subject,
           grade: problem.grade,
+          unit: problem.unit,
+          problemType: problem.problemType,
           stem: problem.stem,
           options: problem.options,
           answer: problem.answer,
@@ -236,7 +240,7 @@ export function Practice({ healthReady }: Props) {
           <span className="muted">{loading ? '加载中…' : `共 ${total} 道`}</span>
         </div>
         <p className="muted small practice-hint">
-          列出所选条件内的错题（同一道题错过多次时，任意一次落在时间范围内就会列出）。「AI
+          只列出还没掌握、且符合筛选条件的错题（同一道题错过多次时，任意一次落在时间范围内就会列出）。「AI
           重新生成」出的变式题只在屏幕上练习，不入库；「打印试卷」打印的是下面筛选出的全部错题（答案可选）。
         </p>
         <div className="row">
@@ -331,12 +335,14 @@ export function Practice({ healthReady }: Props) {
               <div className="chips">
                 {problem.subject && <span className="chip chip--subject">{problem.subject}</span>}
                 {problem.grade && <span className="chip">{problem.grade}</span>}
+                {problem.semester && <span className="chip">{problem.semester}</span>}
+                {problem.unit && <span className="chip">{problem.unit}</span>}
+                {problem.problemType && <span className="chip">{problem.problemType}</span>}
                 {problem.knowledgePoints.map((point) => (
                   <span className="chip chip--point" key={point}>
                     {point}
                   </span>
                 ))}
-                {problem.mastered && <span className="badge badge--ok">已掌握</span>}
               </div>
               <span className="muted small mono">
                 #{problem.id} · {formatDate(problem.createdAt)}

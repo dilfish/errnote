@@ -452,6 +452,10 @@ for (const subject of ['数学', '语文', '英语']) {
 const now = Date.now();
 const day = 24 * 60 * 60 * 1000;
 
+const UNITS = ['第一单元', '第二单元', '第三单元', '第四单元', '第五单元', '第六单元', '第七单元', '第八单元'];
+const SEMESTERS = ['上学期', '下学期'];
+const TYPES = ['选择题', '填空题', '判断题', '计算题', '解答题', '应用题'];
+
 for (const item of picked) {
   const daysAgo = int(0, 120);
   const createdAt = new Date(now - daysAgo * day - int(0, 20) * 60 * 60 * 1000).toISOString();
@@ -465,6 +469,9 @@ for (const item of picked) {
   const draft = repo.importDraft({
     subject: item.subject,
     grade: pick(GRADES),
+    unit: pick(UNITS),
+    semester: pick(SEMESTERS),
+    problemType: item.options && item.options.length > 0 ? '选择题' : pick(TYPES),
     stem: item.stem,
     options: item.options ?? [],
     answer: item.answer,

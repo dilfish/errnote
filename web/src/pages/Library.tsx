@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from '../api';
 import { ProblemCard } from '../components/ProblemCard';
-import { formFromProblem, parseOptionsText, type ProblemForm } from '../form';
+import { formFromProblem, formToPayload, type ProblemForm } from '../form';
 import type { Problem, ProblemListResponse } from '../types';
 
 const PAGE_SIZE = 20;
@@ -113,19 +113,7 @@ export function Library({ onChanged }: Props) {
     }
     setEditing({ ...editing, saving: true, error: undefined });
     try {
-      const payload = {
-        subject: form.subject.trim(),
-        grade: form.grade.trim(),
-        stem: form.stem.trim(),
-        options: parseOptionsText(form.optionsText),
-        answer: form.answer.trim(),
-        analysis: form.analysis.trim(),
-        knowledgePoints: form.knowledgeText
-          .split(/[,，、;；\n]/)
-          .map((item) => item.trim())
-          .filter(Boolean),
-        imagePath: form.imagePath,
-      };
+      const payload = formToPayload(form);
       const result = await api<{ item: Problem }>(`/api/problems/${form.id}`, { method: 'PUT', body: payload });
       setItems((prev) => prev.map((item) => (item.id === result.item.id ? result.item : item)));
       setEditing(null);
@@ -213,6 +201,9 @@ export function Library({ onChanged }: Props) {
               <div className="chips">
                 {problem.subject && <span className="chip chip--subject">{problem.subject}</span>}
                 {problem.grade && <span className="chip">{problem.grade}</span>}
+                {problem.semester && <span className="chip">{problem.semester}</span>}
+                {problem.unit && <span className="chip">{problem.unit}</span>}
+                {problem.problemType && <span className="chip">{problem.problemType}</span>}
                 {problem.knowledgePoints.map((point) => (
                   <span className="chip chip--point" key={point}>
                     {point}

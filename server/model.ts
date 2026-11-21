@@ -8,6 +8,9 @@ export type ProblemOption = { key: string; text: string };
 export type ProblemDraft = {
   subject: string;
   grade: string;
+  unit: string;
+  semester: string;
+  problemType: string;
   stem: string;
   options: ProblemOption[];
   answer: string;
@@ -154,6 +157,9 @@ export function normalizeDraft(raw: unknown, options: NormalizeOptions = {}): Pr
   const draft: ProblemDraft = {
     subject: trimAll(obj.subject).slice(0, 20),
     grade: trimAll(obj.grade).slice(0, 20),
+    unit: trimAll(obj.unit ?? obj.chapter).slice(0, 30),
+    semester: trimAll(obj.semester ?? obj.term).slice(0, 20),
+    problemType: trimAll(obj.problemType ?? obj.problem_type ?? obj.type).slice(0, 20),
     stem: trimAll(obj.stem ?? obj.question ?? obj.content ?? obj.text),
     options: normalizeOptions(obj.options ?? obj.choices),
     answer: trimAll(obj.answer ?? obj.correctAnswer ?? obj.solution),
