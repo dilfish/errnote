@@ -279,12 +279,14 @@ export function Library({ onChanged }: Props) {
                     <p>{problem.analysis}</p>
                   </details>
                 )}
-                {problem.wrongCount > 0 && (
+                {problem.wrongCount > 0 ? (
                   <p className="muted small">
                     错过 {problem.wrongCount} 次
                     {problem.wrongTimes.length > 0 &&
                       `（最近：${problem.wrongTimes.slice(0, 3).map(shortDate).join('、')}）`}
                   </p>
+                ) : (
+                  <p className="muted small">错题次数 0 · 录入后还没再错过</p>
                 )}
               </div>
             </div>

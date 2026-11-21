@@ -5,51 +5,21 @@ import { printPaper } from '../print';
 import { loadStored, saveStored } from '../storage';
 import {
   DIFFICULTY_LABELS,
-  GRADES,
-  SEMESTERS,
-  UNITS,
   type Difficulty,
   type Problem,
   type ProblemDraft,
   type ProblemListResponse,
 } from '../types';
-import { sortByList } from '../utils';
 
 const PAGE_SIZE = 50;
 
-type Range = {
-  key: string;
-  label: string;
-  /** 最近 N 天（N 天前到今天） */
-  days?: number;
-};
-
-const RANGES: Range[] = [
-  { key: 'recent-3', label: '最近 3 天', days: 3 },
-  { key: 'recent-5', label: '最近 5 天', days: 5 },
-  { key: 'recent-7', label: '最近 7 天', days: 7 },
-  { key: 'recent-15', label: '最近 15 天', days: 15 },
-  { key: 'recent-30', label: '最近 30 天', days: 30 },
-  { key: 'all', label: '全部错题' },
-];
-
-const WRONG_COUNTS = [
-  { value: '1', label: '错 1 次以上' },
-  { value: '2', label: '错 2 次以上' },
-  { value: '3', label: '错 3 次以上' },
-  { value: '5', label: '错 5 次以上' },
-];
-
-/** 本次练习卷里的一道题（只存在于页面上，不入库） */
-type SheetItem = {
+/** 本次练习里某道错题被替换成的变式题（只存在于页面上，不入库） */
+type Variant = {
   form: ProblemForm;
-  fromId: number;
   difficulty: Difficulty;
+  /** 生成时的原题快照，点「查看原题」时展示 */
+  original: Problem;
 };
-
-function daysAgo(days: number): string {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-}
 
 function formatDate(value: string): string {
   if (!value) return '';
@@ -59,8 +29,10 @@ function formatDate(value: string): string {
   return diff <= 0 ? '今天' : `${diff} 天前`;
 }
 
-function latestWrongTime(problem: Problem): string {
-  return problem.wrongTimes.length > 0 ? problem.wrongTimes[0] : problem.createdAt;
+/** createdAt 只是录入时间；只有真正记过错误时才有错误时间 */
+function latestWrongLabel(problem: Problem): string {
+  if (problem.wrongTimes.length > 0) return `最近错在 ${formatDate(problem.wrongTimes[0])}`;
+  return `录入于 ${formatDate(problem.createdAt)}`;
 }
 
 type Props = {
@@ -71,36 +43,21 @@ const FILTER_KEY = 'errnote.filters.practice';
 
 const DEFAULT_FILTERS = {
   subject: '',
-  grade: '',
-  semester: '',
-  unit: '',
-  minWrong: '1',
-  rangeKey: 'recent-5',
   withAnswers: false,
 };
 
 function initialFilters() {
   const stored = loadStored(FILTER_KEY, DEFAULT_FILTERS);
   return {
-    ...stored,
-    // 选项被改过（比如删掉了某个选项）时回退到默认，避免选中项不存在
-    rangeKey: RANGES.some((item) => item.key === stored.rangeKey) ? stored.rangeKey : DEFAULT_FILTERS.rangeKey,
-    minWrong: WRONG_COUNTS.some((item) => item.value === stored.minWrong) ? stored.minWrong : DEFAULT_FILTERS.minWrong,
+    subject: typeof stored.subject === 'string' ? stored.subject : '',
+    withAnswers: stored.withAnswers === true,
   };
 }
 
 export function Practice({ healthReady }: Props) {
   const stored = useMemo(initialFilters, []);
   const [subject, setSubject] = useState(stored.subject);
-  const [grade, setGrade] = useState(stored.grade);
-  const [semester, setSemester] = useState(stored.semester);
-  const [unit, setUnit] = useState(stored.unit);
-  const [minWrong, setMinWrong] = useState(stored.minWrong);
-  const [rangeKey, setRangeKey] = useState(stored.rangeKey);
   const [subjects, setSubjects] = useState<string[]>([]);
-  const [grades, setGrades] = useState<string[]>([]);
-  const [semesters, setSemesters] = useState<string[]>([]);
-  const [units, setUnits] = useState<string[]>([]);
   const [items, setItems] = useState<Problem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -108,37 +65,26 @@ export function Practice({ healthReady }: Props) {
   const [notConfigured, setNotConfigured] = useState(false);
   const [difficulty, setDifficulty] = useState<Record<number, Difficulty>>({});
   const [generating, setGenerating] = useState<number | null>(null);
-  const [sheet, setSheet] = useState<SheetItem[]>([]);
+  /** 原题 id → 用来替换显示它的变式题 */
+  const [variants, setVariants] = useState<Record<number, Variant>>({});
+  const [openOriginals, setOpenOriginals] = useState<Record<number, boolean>>({});
   const [notice, setNotice] = useState('');
   const [withAnswers, setWithAnswers] = useState(stored.withAnswers);
   const [printing, setPrinting] = useState(false);
 
-  const range = RANGES.find((item) => item.key === rangeKey) ?? RANGES[1];
-
   useEffect(() => {
-    api<{
-      subjects: { subject: string; n: number }[];
-      grades: { grade: string; n: number }[];
-      units: { unit: string; n: number }[];
-      semesters: { semester: string; n: number }[];
-    }>('/api/filters')
+    api<{ subjects: { subject: string; n: number }[] }>('/api/subjects')
       .then((result) => {
         setSubjects(result.subjects.map((item) => item.subject));
-        setGrades(result.grades.map((item) => item.grade));
-        setUnits(result.units.map((item) => item.unit));
-        setSemesters(result.semesters.map((item) => item.semester));
       })
       .catch(() => {
         setSubjects([]);
-        setGrades([]);
-        setUnits([]);
-        setSemesters([]);
       });
   }, []);
 
   useEffect(() => {
-    saveStored(FILTER_KEY, { subject, grade, semester, unit, minWrong, rangeKey, withAnswers });
-  }, [subject, grade, semester, unit, minWrong, rangeKey, withAnswers]);
+    saveStored(FILTER_KEY, { subject, withAnswers });
+  }, [subject, withAnswers]);
 
   const load = useCallback(
     async (offset = 0) => {
@@ -147,12 +93,8 @@ export function Practice({ healthReady }: Props) {
       try {
         const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
         if (subject) params.set('subject', subject);
-        if (grade) params.set('grade', grade);
-        if (semester) params.set('semester', semester);
-        if (unit) params.set('unit', unit);
-        if (minWrong) params.set('minWrongCount', minWrong);
         params.set('mastered', '0');
-        if (range.days) params.set('after', daysAgo(range.days));
+        params.set('scope', 'weekly');
         const result = await api<ProblemListResponse>(`/api/problems?${params.toString()}`);
         setTotal(result.total);
         setItems((prev) => (offset === 0 ? result.items : [...prev, ...result.items]));
@@ -162,8 +104,7 @@ export function Practice({ healthReady }: Props) {
         setLoading(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subject, grade, semester, unit, minWrong, rangeKey],
+    [subject],
   );
 
   useEffect(() => {
@@ -176,6 +117,7 @@ export function Practice({ healthReady }: Props) {
 
   async function generate(problem: Problem): Promise<void> {
     const level = difficultyOf(problem.id);
+    const replacing = variants[problem.id] !== undefined;
     setGenerating(problem.id);
     setError('');
     setNotConfigured(false);
@@ -189,11 +131,20 @@ export function Practice({ healthReady }: Props) {
         setError('AI 没有生成内容，换个难度再试');
         return;
       }
-      setSheet((prev) => [
-        { form: formFromDraft(result.items[0]), fromId: problem.id, difficulty: result.difficulty },
+      // 就地替换这道题的显示，原题仍然记在变式题里
+      setVariants((prev) => ({
         ...prev,
-      ]);
-      setNotice(`已生成 1 道「${DIFFICULTY_LABELS[result.difficulty]}」新题，共 ${sheet.length + 1} 题，可以直接打印`);
+        [problem.id]: {
+          form: formFromDraft(result.items[0]),
+          difficulty: result.difficulty,
+          original: problem,
+        },
+      }));
+      setNotice(
+        `已把 #${problem.id} 的显示换成「${DIFFICULTY_LABELS[result.difficulty]}」变式题${
+          replacing ? '（替换了上一道变式）' : ''
+        }，原题没删，可点「查看原题」对照`,
+      );
     } catch (err) {
       if (err instanceof ApiError && err.code === 'AI_NOT_CONFIGURED') {
         setNotConfigured(true);
@@ -204,11 +155,21 @@ export function Practice({ healthReady }: Props) {
     }
   }
 
-  function removeSheetItem(index: number): void {
-    setSheet((prev) => prev.filter((_, i) => i !== index));
+  /** 还原成原题显示（变式题只在页面上，不入库） */
+  function restoreOriginal(id: number): void {
+    setVariants((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setOpenOriginals((prev) => ({ ...prev, [id]: false }));
   }
 
-  /** 打印「当前筛选出的全部错题」，不是 AI 生成的新题 */
+  function toggleOriginal(id: number): void {
+    setOpenOriginals((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  /** 打印当前学科下的全部未掌握错题，不是 AI 生成的新题 */
   async function printFiltered(): Promise<void> {
     setPrinting(true);
     setError('');
@@ -218,19 +179,15 @@ export function Practice({ healthReady }: Props) {
       for (let page = 0; page < 20; page += 1) {
         const params = new URLSearchParams({ limit: '200', offset: String(offset) });
         if (subject) params.set('subject', subject);
-        if (grade) params.set('grade', grade);
-        if (semester) params.set('semester', semester);
-        if (unit) params.set('unit', unit);
-        if (minWrong) params.set('minWrongCount', minWrong);
         params.set('mastered', '0');
-        if (range.days) params.set('after', daysAgo(range.days));
+        params.set('scope', 'weekly');
         const result = await api<ProblemListResponse>(`/api/problems?${params.toString()}`);
         collected.push(...result.items);
         offset += result.items.length;
         if (result.items.length === 0 || offset >= result.total) break;
       }
       if (collected.length === 0) {
-        setError('当前筛选没有题目，没法打印');
+        setError('当前学科没有题目，没法打印');
         return;
       }
       printPaper(
@@ -265,49 +222,11 @@ export function Practice({ healthReady }: Props) {
               </option>
             ))}
           </select>
-          <select value={rangeKey} onChange={(event) => setRangeKey(event.target.value)}>
-            {RANGES.map((item) => (
-              <option key={item.key} value={item.key}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <select value={grade} onChange={(event) => setGrade(event.target.value)}>
-            <option value="">全部年级</option>
-            {sortByList(grades, GRADES).map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <select value={semester} onChange={(event) => setSemester(event.target.value)}>
-            <option value="">全部学期</option>
-            {sortByList(semesters, SEMESTERS).map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <select value={unit} onChange={(event) => setUnit(event.target.value)}>
-            <option value="">全部单元</option>
-            {sortByList(units, UNITS).map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <select value={minWrong} onChange={(event) => setMinWrong(event.target.value)}>
-            {WRONG_COUNTS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
           <span className="muted">{loading ? '加载中…' : `共 ${total} 道`}</span>
         </div>
         <p className="muted small practice-hint">
-          只列出还没掌握、且符合筛选条件的错题（同一道题错过多次时，任意一次落在时间范围内就会列出）。「AI
-          重新生成」出的变式题只在屏幕上练习，不入库；「打印试卷」打印的是下面筛选出的全部错题（答案可选）。
+          只显示两类题：① 本周一到现在新录入、还没再错过的题；② 上一次错误发生在上周（周一到周日）的题。可按学科筛选。「AI
+          重新生成」会就地把这道题换成变式题（原错题仍保留，可点「查看原题」对照、随时还原）；「打印试卷」打印的是下面列出的全部错题（答案可选）。
         </p>
         <div className="row">
           <label className="checkbox">
@@ -339,54 +258,6 @@ export function Practice({ healthReady }: Props) {
         </div>
       )}
 
-      {sheet.length > 0 && (
-        <section className="card sheet">
-          <div className="section-head">
-            <h2>AI 变式题（{sheet.length} 题 · 仅本次练习）</h2>
-            <div className="sheet-actions">
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setSheet([])}>
-                清空
-              </button>
-            </div>
-          </div>
-          <p className="muted small">变式题只用于屏幕练习，不写进错题本，原错题也不变；打印试卷打印的是下面的筛选结果。</p>
-
-          {sheet.map((item, index) => (
-            <article className="sheet-item" key={item.form.key}>
-              <header>
-                <span className="sheet-no">{index + 1}</span>
-                <span className="chips">
-                  {item.form.subject && <span className="chip chip--subject">{item.form.subject}</span>}
-                  {item.form.grade && <span className="chip">{item.form.grade}</span>}
-                  <span className="chip">{DIFFICULTY_LABELS[item.difficulty]}</span>
-                  <span className="chip">原题 #{item.fromId}</span>
-                </span>
-                <button type="button" className="btn btn--sm btn--ghost" onClick={() => removeSheetItem(index)}>
-                  移除
-                </button>
-              </header>
-              <p className="stem">{item.form.stem}</p>
-              {item.form.optionsText.trim() && (
-                <ul className="options">
-                  {parseOptionsText(item.form.optionsText).map((option) => (
-                    <li key={option.key}>
-                      <b>{option.key}.</b> {option.text}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <details>
-                <summary>查看答案与解析</summary>
-                <p className="answer">
-                  <span className="label">答案</span> {item.form.answer}
-                </p>
-                {item.form.analysis && <p className="analysis">{item.form.analysis}</p>}
-              </details>
-            </article>
-          ))}
-        </section>
-      )}
-
       {!loading && items.length === 0 && (
         <div className="empty">
           <p>这个范围里没有错题。</p>
@@ -395,65 +266,113 @@ export function Practice({ healthReady }: Props) {
       )}
 
       <div className="list">
-        {items.map((problem) => (
-          <article className="card practice-item" key={problem.id}>
-            <header>
-              <div className="chips">
-                {problem.subject && <span className="chip chip--subject">{problem.subject}</span>}
-                {problem.grade && <span className="chip">{problem.grade}</span>}
-                {problem.semester && <span className="chip">{problem.semester}</span>}
-                {problem.unit && <span className="chip">{problem.unit}</span>}
-                {problem.problemType && <span className="chip">{problem.problemType}</span>}
-                {problem.knowledgePoints.map((point) => (
-                  <span className="chip chip--point" key={point}>
-                    {point}
-                  </span>
-                ))}
-              </div>
-              <span className="muted small mono">
-                #{problem.id} · 最近错在 {formatDate(latestWrongTime(problem))}
-              </span>
-            </header>
+        {items.map((problem) => {
+          const variant = variants[problem.id];
+          const originalOpen = Boolean(openOriginals[problem.id]);
+          const options = variant ? parseOptionsText(variant.form.optionsText) : problem.options;
+          return (
+            <article className={`card practice-item${variant ? ' is-variant' : ''}`} key={problem.id}>
+              <header>
+                <div className="chips">
+                  {problem.subject && <span className="chip chip--subject">{problem.subject}</span>}
+                  {problem.grade && <span className="chip">{problem.grade}</span>}
+                  {problem.semester && <span className="chip">{problem.semester}</span>}
+                  {problem.unit && <span className="chip">{problem.unit}</span>}
+                  {problem.problemType && <span className="chip">{problem.problemType}</span>}
+                  {problem.knowledgePoints.map((point) => (
+                    <span className="chip chip--point" key={point}>
+                      {point}
+                    </span>
+                  ))}
+                  {variant && (
+                    <span className="chip chip--variant">变式 · {DIFFICULTY_LABELS[variant.difficulty]}</span>
+                  )}
+                </div>
+                <span className="muted small mono">
+                  #{problem.id} · {latestWrongLabel(problem)}
+                </span>
+              </header>
 
-            <p className="stem">{problem.stem}</p>
-            {problem.options.length > 0 && (
-              <ul className="options">
-                {problem.options.map((option) => (
-                  <li key={option.key}>
-                    <b>{option.key}.</b> {option.text}
-                  </li>
-                ))}
-              </ul>
-            )}
+              <p className="stem">{variant ? variant.form.stem : problem.stem}</p>
+              {options.length > 0 && (
+                <ul className="options">
+                  {options.map((option) => (
+                    <li key={option.key}>
+                      <b>{option.key}.</b> {option.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
 
-            <footer className="practice-item__foot">
-              <span className="muted small">生成难度</span>
-              <select
-                className="select-inline"
-                value={difficultyOf(problem.id)}
-                onChange={(event) =>
-                  setDifficulty((prev) => ({ ...prev, [problem.id]: event.target.value as Difficulty }))
-                }
-                disabled={generating === problem.id}
-              >
-                {(['easy', 'medium', 'hard'] as Difficulty[]).map((key) => (
-                  <option key={key} value={key}>
-                    {DIFFICULTY_LABELS[key]}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="btn btn--sm btn--primary"
-                onClick={() => void generate(problem)}
-                disabled={generating !== null || !healthReady}
-              >
-                {generating === problem.id ? '生成中…' : 'AI 重新生成'}
-              </button>
-              {problem.wrongCount > 0 && <span className="muted small">错过 {problem.wrongCount} 次</span>}
-            </footer>
-          </article>
-        ))}
+              {variant && (
+                <details className="variant-answer">
+                  <summary>查看答案与解析</summary>
+                  <p className="answer">
+                    <span className="label">答案</span> {variant.form.answer}
+                  </p>
+                  {variant.form.analysis && <p className="analysis">{variant.form.analysis}</p>}
+                </details>
+              )}
+
+              {variant && originalOpen && (
+                <div className="original-reveal">
+                  <div className="original-reveal__head">原题 #{problem.id}</div>
+                  <p className="stem">{variant.original.stem}</p>
+                  {variant.original.options.length > 0 && (
+                    <ul className="options">
+                      {variant.original.options.map((option) => (
+                        <li key={option.key}>
+                          <b>{option.key}.</b> {option.text}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              <footer className="practice-item__foot">
+                <span className="muted small">生成难度</span>
+                <select
+                  className="select-inline"
+                  value={difficultyOf(problem.id)}
+                  onChange={(event) =>
+                    setDifficulty((prev) => ({ ...prev, [problem.id]: event.target.value as Difficulty }))
+                  }
+                  disabled={generating === problem.id}
+                >
+                  {(['easy', 'medium', 'hard'] as Difficulty[]).map((key) => (
+                    <option key={key} value={key}>
+                      {DIFFICULTY_LABELS[key]}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn--sm btn--primary"
+                  onClick={() => void generate(problem)}
+                  disabled={generating !== null || !healthReady}
+                >
+                  {generating === problem.id ? '生成中…' : variant ? '换一道变式' : 'AI 重新生成'}
+                </button>
+                {variant && (
+                  <>
+                    <button type="button" className="btn btn--sm" onClick={() => toggleOriginal(problem.id)}>
+                      {originalOpen ? '收起原题' : '查看原题'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--ghost"
+                      onClick={() => restoreOriginal(problem.id)}
+                    >
+                      还原原题
+                    </button>
+                  </>
+                )}
+                {problem.wrongCount > 0 && <span className="muted small">错过 {problem.wrongCount} 次</span>}
+              </footer>
+            </article>
+          );
+        })}
       </div>
 
       {items.length < total && (

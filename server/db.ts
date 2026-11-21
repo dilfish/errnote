@@ -70,6 +70,17 @@ function likeEscape(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
+/**
+ * 本周一 00:00 与上周一 00:00（本地时区）。
+ * 练习页用它算「本周新录入」和「上周最后一次错误」。
+ */
+export function weekBoundaries(now = new Date()): { thisMonday: string; lastMonday: string } {
+  const daysFromMonday = (now.getDay() + 6) % 7;
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysFromMonday);
+  const lastMonday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 7);
+  return { thisMonday: monday.toISOString(), lastMonday: lastMonday.toISOString() };
+}
+
 export function openDb(file: string): DatabaseSync {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL;');
@@ -97,7 +108,7 @@ function migrate(db: DatabaseSync): void {
       problem_type TEXT NOT NULL DEFAULT '',
       source TEXT NOT NULL DEFAULT '',
       image_path TEXT,
-      wrong_count INTEGER NOT NULL DEFAULT 1,
+      wrong_count INTEGER NOT NULL DEFAULT 0,
       mastered INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -214,6 +225,18 @@ export class ProblemRepo {
       );
       params.push(filter.createdAfter);
     }
+    // 练习页周视图：①本周一到现在新录入、还没再错过的题 ②最后一次错误发生在上周的题
+    if (filter.weekly) {
+      const { thisMonday, lastMonday } = weekBoundaries();
+      where.push(`(
+        (problems.wrong_count = 0 AND problems.created_at >= ?)
+        OR (
+          EXISTS (SELECT 1 FROM error_events e WHERE e.problem_id = problems.id AND e.created_at >= ? AND e.created_at < ?)
+          AND NOT EXISTS (SELECT 1 FROM error_events e WHERE e.problem_id = problems.id AND e.created_at >= ?)
+        )
+      )`);
+      params.push(thisMonday, lastMonday, thisMonday, thisMonday);
+    }
     if (filter.q) {
       const needle = `%${likeEscape(filter.q)}%`;
       where.push(
@@ -270,7 +293,7 @@ export class ProblemRepo {
       .prepare(
         `INSERT INTO problems
           (subject, grade, stem, options, answer, analysis, knowledge_points, unit, semester, problem_type, source, image_path, wrong_count, mastered, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
       )
       .run(
         draft.subject,
@@ -289,9 +312,8 @@ export class ProblemRepo {
         timestamp,
         timestamp,
       );
-    const id = Number(result.lastInsertRowid);
-    this.addErrorEvent(id, timestamp);
-    return this.get(id) as Problem;
+    // 新录入的题错误次数从 0 开始，created_at 只是「录入时间」，不写 error_events
+    return this.get(Number(result.lastInsertRowid)) as Problem;
   }
 
   /** 记一次错误时间 */
@@ -375,6 +397,10 @@ export class ProblemRepo {
   ): Problem {
     const normalized = normalizeDraft(draft, { requireStem: true, requireAnswer: false });
     const timestamp = draft.createdAt || nowIso();
+    const times = (Array.isArray(draft.wrongTimes) ? draft.wrongTimes : []).filter(
+      (time): time is string => typeof time === 'string' && time.length > 0,
+    );
+    const wrongCount = Math.max(0, Number(draft.wrongCount ?? times.length) || 0);
     const result = this.db
       .prepare(
         `INSERT INTO problems
@@ -394,16 +420,13 @@ export class ProblemRepo {
         normalized.problemType,
         normalized.source,
         normalized.imagePath,
-        Number(draft.wrongCount ?? 1),
+        wrongCount,
         draft.mastered ? 1 : 0,
         timestamp,
         timestamp,
       );
     const id = Number(result.lastInsertRowid);
-    const times = Array.isArray(draft.wrongTimes) && draft.wrongTimes.length > 0 ? draft.wrongTimes : [timestamp];
-    for (const time of times) {
-      if (typeof time === 'string' && time) this.addErrorEvent(id, time);
-    }
+    for (const time of times) this.addErrorEvent(id, time);
     return this.get(id) as Problem;
   }
 }

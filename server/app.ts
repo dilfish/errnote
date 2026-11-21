@@ -185,6 +185,7 @@ export function createApp(deps: AppDeps): (req: http.IncomingMessage, res: http.
           knowledgePoint: params.get('knowledgePoint') ?? undefined,
           mastered: masteredRaw === '1' || masteredRaw === 'true' ? true : masteredRaw === '0' || masteredRaw === 'false' ? false : undefined,
           minWrongCount: Number.isFinite(minWrongRaw) && minWrongRaw > 0 ? minWrongRaw : undefined,
+          weekly: params.get('scope') === 'weekly',
           q: params.get('q')?.trim() || undefined,
           createdBefore: before && !Number.isNaN(Date.parse(before)) ? new Date(before).toISOString() : undefined,
           createdAfter: after && !Number.isNaN(Date.parse(after)) ? new Date(after).toISOString() : undefined,

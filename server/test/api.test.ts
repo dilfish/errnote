@@ -6,7 +6,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, describe, it } from 'node:test';
 import { createApp } from '../app.ts';
-import { openDb, ProblemRepo } from '../db.ts';
+import { openDb, ProblemRepo, weekBoundaries } from '../db.ts';
 import { distDir, imagesDir } from '../paths.ts';
 
 type Server = {
@@ -299,14 +299,15 @@ describe('题库存取与筛选', () => {
       json: { subject: '数学', stem: '状态测试题', answer: '1' },
     });
     const id = created.body.item.id;
-    assert.equal(created.body.item.wrongCount, 1);
-    assert.equal(created.body.item.wrongTimes.length, 1);
+    // 新录入的题错误次数从 0 开始，录入时间不算错误时间
+    assert.equal(created.body.item.wrongCount, 0);
+    assert.equal(created.body.item.wrongTimes.length, 0);
 
     const wrong = await call<{ item: { wrongCount: number; wrongTimes: string[] } }>(`/api/problems/${id}/wrong`, {
       method: 'POST',
     });
-    assert.equal(wrong.body.item.wrongCount, 2);
-    assert.equal(wrong.body.item.wrongTimes.length, 2);
+    assert.equal(wrong.body.item.wrongCount, 1);
+    assert.equal(wrong.body.item.wrongTimes.length, 1);
     assert.ok(wrong.body.item.wrongTimes.every((time) => !Number.isNaN(Date.parse(time))));
 
     const mastered = await call<{ item: { mastered: boolean } }>(`/api/problems/${id}/mastered`, {
@@ -325,14 +326,37 @@ describe('题库存取与筛选', () => {
     });
     const id = created.body.item.id;
 
-    const once = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=1');
-    assert.equal(once.body.total, 1);
+    const zero = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=1');
+    assert.equal(zero.body.total, 0);
     const twice = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=2');
     assert.equal(twice.body.total, 0);
 
     await call(`/api/problems/${id}/wrong`, { method: 'POST' });
+    const once = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=1');
+    assert.equal(once.body.total, 1);
     const twiceAfter = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=2');
-    assert.equal(twiceAfter.body.total, 1);
+    assert.equal(twiceAfter.body.total, 0);
+
+    await call(`/api/problems/${id}/wrong`, { method: 'POST' });
+    const twiceAfterTwo = await call<{ total: number }>('/api/problems?subject=次数测试&minWrongCount=2');
+    assert.equal(twiceAfterTwo.body.total, 1);
+  });
+
+  it('新录入的题不会因为录入时间而命中时间筛选', async () => {
+    const created = await call<{ item: { id: number } }>('/api/problems', {
+      method: 'POST',
+      json: { subject: '录入时间测试', stem: '刚录入还没再错的题', answer: '1' },
+    });
+    const recent = await call<{ total: number }>(
+      `/api/problems?subject=${encodeURIComponent('录入时间测试')}&after=${encodeURIComponent(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())}`,
+    );
+    assert.equal(recent.body.total, 0, '录入时间不算错误时间');
+
+    await call(`/api/problems/${created.body.item.id}/wrong`, { method: 'POST' });
+    const afterWrong = await call<{ total: number }>(
+      `/api/problems?subject=${encodeURIComponent('录入时间测试')}&after=${encodeURIComponent(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())}`,
+    );
+    assert.equal(afterWrong.body.total, 1);
   });
 
   it('按年级筛选，并返回年级统计', async () => {
@@ -351,6 +375,7 @@ describe('题库存取与筛选', () => {
   });
 
   it('按发生日期区间筛选错题（任意一次错误时间命中即可）', async () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
     const old = repo.importDraft({
       subject: '日期测试',
       grade: '三年级',
@@ -361,7 +386,9 @@ describe('题库存取与筛选', () => {
       knowledgePoints: ['日期测试'],
       source: 'test',
       imagePath: null,
-      createdAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: tenDaysAgo,
+      wrongCount: 1,
+      wrongTimes: [tenDaysAgo],
     });
     const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -384,8 +411,71 @@ describe('题库存取与筛选', () => {
     assert.equal(recentAfter.body.total, 1);
   });
 
-  it('老库（v1）升级后自动补错误时间并计入首次错误', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'errnote-migrate-'));
+  it('练习页周视图：本周新录入（0 次） + 上周最后一次错误', async () => {
+    const { thisMonday, lastMonday } = weekBoundaries();
+    const thisMs = Date.parse(thisMonday);
+    const lastMs = Date.parse(lastMonday);
+    const hour = 60 * 60 * 1000;
+    const day = 24 * hour;
+    const at = (ms: number) => new Date(ms).toISOString();
+    const subject = '周视图测试';
+
+    repo.importDraft({
+      subject,
+      stem: '本周新录入',
+      answer: '1',
+      createdAt: at(thisMs + 2 * hour),
+    });
+    repo.importDraft({
+      subject,
+      stem: '本周新录入但已经错过',
+      answer: '1',
+      createdAt: at(thisMs + 2 * hour),
+      wrongCount: 1,
+      wrongTimes: [at(thisMs + 3 * hour)],
+    });
+    repo.importDraft({
+      subject,
+      stem: '上周最后一次错',
+      answer: '1',
+      createdAt: at(lastMs - 14 * day),
+      wrongCount: 2,
+      wrongTimes: [at(lastMs - 13 * day), at(lastMs + 2 * day)],
+    });
+    repo.importDraft({
+      subject,
+      stem: '上周错过、本周又错',
+      answer: '1',
+      createdAt: at(lastMs - 14 * day),
+      wrongCount: 2,
+      wrongTimes: [at(lastMs + 2 * day), at(thisMs + hour)],
+    });
+    repo.importDraft({
+      subject,
+      stem: '只有更早的错',
+      answer: '1',
+      createdAt: at(lastMs - 14 * day),
+      wrongCount: 1,
+      wrongTimes: [at(lastMs - 3 * day)],
+    });
+    repo.importDraft({
+      subject,
+      stem: '上周录入还没错',
+      answer: '1',
+      createdAt: at(lastMs + 2 * hour),
+    });
+
+    const weekly = repo.list({ weekly: true, subject });
+    assert.equal(weekly.total, 2);
+    assert.deepEqual(weekly.items.map((item) => item.stem).sort(), ['上周最后一次错', '本周新录入']);
+
+    const viaApi = await call<{ total: number }>(
+      `/api/problems?scope=weekly&mastered=0&subject=${encodeURIComponent(subject)}`,
+    );
+    assert.equal(viaApi.body.total, 2);
+  });
+
+  it('老库（v1）升级后自动补错误时间并计入首次错误', () => {    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'errnote-migrate-'));
     const file = path.join(dir, 'old.db');
     const raw = new DatabaseSync(file);
     raw.exec(`

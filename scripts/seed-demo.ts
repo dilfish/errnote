@@ -460,8 +460,8 @@ for (const item of picked) {
   const daysAgo = int(0, 120);
   const createdAt = new Date(now - daysAgo * day - int(0, 20) * 60 * 60 * 1000).toISOString();
   const wrongCount = random() < 0.45 ? int(1, 3) : 0;
-  // 每次错误给一个时间：首次是创建时间，其余落在创建时间和现在之间
-  const wrongTimes = [createdAt];
+  // 错误时间落在「录入之后」到现在之间；录入时间本身不算错误时间
+  const wrongTimes: string[] = [];
   for (let i = 0; i < wrongCount; i += 1) {
     const span = now - new Date(createdAt).getTime();
     wrongTimes.push(new Date(new Date(createdAt).getTime() + Math.floor(random() * span)).toISOString());
@@ -480,7 +480,7 @@ for (const item of picked) {
     source: SOURCE,
     imagePath: null,
     createdAt,
-    wrongCount: wrongCount + 1,
+    wrongCount,
     wrongTimes,
     mastered: random() < 0.3,
   });

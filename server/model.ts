@@ -50,6 +50,8 @@ export type ProblemFilter = {
   q?: string;
   /** 至少错了几次 */
   minWrongCount?: number;
+  /** 练习页周视图：本周新录入（0 次错误）+ 上一次错误落在上周 */
+  weekly?: boolean;
   /** ISO 时间，筛选发生在该时间之前/之后的错题（任意一次错误时间命中即可） */
   createdBefore?: string;
   createdAfter?: string;
